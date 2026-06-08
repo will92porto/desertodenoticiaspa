@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh auth *)",
+      "Bash(git -C /Users/willianporto/Documents/DesertodeNoticias status)",
+      "Bash(git config *)"
+    ]
+  }
+}

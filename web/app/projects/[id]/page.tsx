@@ -1,0 +1,93 @@
+import { revalidatePath } from "next/cache";
+import { supabaseAdmin } from "@/lib/supabase";
+
+export const dynamic = "force-dynamic";
+
+async function addRegion(formData: FormData) {
+  "use server";
+  const db = supabaseAdmin();
+  await db.from("regions").insert({
+    project_id: String(formData.get("project_id")),
+    name: String(formData.get("name")),
+    state: String(formData.get("state") || "") || null,
+  });
+  revalidatePath(`/projects/${formData.get("project_id")}`);
+}
+
+async function addSource(formData: FormData) {
+  "use server";
+  const db = supabaseAdmin();
+  await db.from("sources").insert({
+    region_id: String(formData.get("region_id")),
+    type: String(formData.get("type")),
+    name: String(formData.get("name")),
+    url: String(formData.get("url")),
+    check_interval_minutes: Number(formData.get("interval") || 60),
+  });
+  revalidatePath(`/projects/${formData.get("project_id")}`);
+}
+
+export default async function ProjectDetail({ params }: { params: { id: string } }) {
+  const db = supabaseAdmin();
+  const { data: project } = await db.from("projects").select("*").eq("id", params.id).single();
+  const { data: regions } = await db
+    .from("regions").select("*, sources(*)").eq("project_id", params.id);
+
+  if (!project) return <p>Projeto não encontrado.</p>;
+
+  return (
+    <div>
+      <h2>{project.name}</h2>
+      <p className="muted">{project.description}</p>
+
+      <div className="card">
+        <h3>Adicionar região</h3>
+        <form action={addRegion} className="row">
+          <input type="hidden" name="project_id" value={project.id} />
+          <input name="name" placeholder="Nome da região (ex.: Sertão Central - CE)" required />
+          <input name="state" placeholder="UF" style={{ maxWidth: 80 }} />
+          <button className="btn" type="submit">Adicionar</button>
+        </form>
+      </div>
+
+      {(regions ?? []).map((r: any) => (
+        <div className="card" key={r.id}>
+          <h3>{r.name} <span className="badge">{r.state || "—"}</span></h3>
+
+          <table>
+            <thead><tr><th>Fonte</th><th>Tipo</th><th>URL</th><th>Intervalo</th></tr></thead>
+            <tbody>
+              {(r.sources ?? []).map((s: any) => (
+                <tr key={s.id}>
+                  <td>{s.name}</td>
+                  <td><span className="badge">{s.type}</span></td>
+                  <td className="muted" style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis" }}>{s.url}</td>
+                  <td>{s.check_interval_minutes} min</td>
+                </tr>
+              ))}
+              {(!r.sources || r.sources.length === 0) && (
+                <tr><td colSpan={4} className="muted">Sem fontes nesta região.</td></tr>
+              )}
+            </tbody>
+          </table>
+
+          <form action={addSource} className="row" style={{ marginTop: 12, flexWrap: "wrap" }}>
+            <input type="hidden" name="project_id" value={project.id} />
+            <input type="hidden" name="region_id" value={r.id} />
+            <input name="name" placeholder="Nome da fonte" required style={{ maxWidth: 180 }} />
+            <select name="type" style={{ maxWidth: 160 }}>
+              <option value="youtube">YouTube</option>
+              <option value="instagram">Instagram</option>
+              <option value="tiktok">TikTok</option>
+              <option value="diario_oficial">Diário Oficial</option>
+              <option value="website">Site público</option>
+            </select>
+            <input name="url" placeholder="URL" required style={{ maxWidth: 260 }} />
+            <input name="interval" type="number" defaultValue={60} style={{ maxWidth: 90 }} />
+            <button className="btn secondary" type="submit">+ Fonte</button>
+          </form>
+        </div>
+      ))}
+    </div>
+  );
+}

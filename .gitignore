@@ -1,0 +1,21 @@
+# deps
+node_modules/
+web/node_modules/
+
+# next
+web/.next/
+web/out/
+
+# env
+.env
+.env*.local
+web/.env
+web/.env*.local
+
+# supabase
+.supabase/
+supabase/.temp/
+
+# misc
+.DS_Store
+*.log

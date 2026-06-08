@@ -1,0 +1,24 @@
+# Configuração local do Supabase CLI.
+# Substitua project_id ao rodar `supabase link`.
+project_id = "deserto-de-noticias"
+
+[functions.ingest-cron]
+verify_jwt = false
+
+[functions.pipeline-orchestrator]
+verify_jwt = false
+
+[functions.step-understand]
+verify_jwt = false
+
+[functions.step-rank]
+verify_jwt = false
+
+[functions.step-write]
+verify_jwt = false
+
+[functions.step-polish]
+verify_jwt = false
+
+[functions.publish-wordpress]
+verify_jwt = false
