@@ -1,0 +1,685 @@
+################################################################################
+## FUNÇÃO: step-understand   →   cole no editor web na função de mesmo nome
+################################################################################
+
+// ============================================================================
+// ETAPA 1 — Entendimento / transcrição  (ARQUIVO ÚNICO para o editor web)
+// Cole TODO este conteúdo no editor da função "step-understand" no Dashboard.
+// ============================================================================
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+// ---- helpers HTTP/CORS ----
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status, headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+// ---- cliente admin ----
+function adminClient() {
+  return createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } },
+  );
+}
+
+// ---- Gemini ----
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+async function callGemini(p: {
+  model: string; systemPrompt: string; userPrompt: string;
+  temperature?: number; maxOutputTokens?: number; responseMimeType?: string;
+}) {
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
+  const body = {
+    systemInstruction: { parts: [{ text: p.systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: p.userPrompt }] }],
+    generationConfig: {
+      temperature: p.temperature ?? 0.7,
+      maxOutputTokens: p.maxOutputTokens ?? 4096,
+      ...(p.responseMimeType ? { responseMimeType: p.responseMimeType } : {}),
+    },
+  };
+  const res = await fetch(`${GEMINI_BASE}/${p.model}:generateContent?key=${apiKey}`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+  const j = await res.json();
+  const text: string = j?.candidates?.[0]?.content?.parts?.map((x: any) => x.text ?? "").join("") ?? "";
+  return { text, tokensInput: j?.usageMetadata?.promptTokenCount, tokensOutput: j?.usageMetadata?.candidatesTokenCount };
+}
+function parseJsonLoose<T = any>(text: string): T {
+  let t = text.trim();
+  if (t.startsWith("```")) t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  return JSON.parse(t) as T;
+}
+
+// ---- resolução de config + template ----
+async function resolveStepConfig(db: any, step: string, projectId: string) {
+  const { data, error } = await db.from("step_configs").select("*")
+    .eq("step", step).eq("is_active", true)
+    .or(`project_id.eq.${projectId},project_id.is.null`);
+  if (error) throw error;
+  if (!data?.length) throw new Error(`Nenhuma step_config ativa para "${step}".`);
+  return data.find((c: any) => c.project_id === projectId) ?? data[0];
+}
+function renderTemplate(tpl: string, vars: Record<string, unknown>): string {
+  return tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k: string) => {
+    const v = vars[k];
+    if (v === undefined || v === null) return "";
+    return typeof v === "string" ? v : JSON.stringify(v);
+  });
+}
+
+// ---- executa a etapa (config -> prompt -> Gemini -> log) ----
+async function runStep(db: any, step: string, item: any, vars: Record<string, unknown>) {
+  const config = await resolveStepConfig(db, step, item.project_id);
+  const userPrompt = renderTemplate(config.user_prompt_template, vars);
+  const responseMimeType = config.extra?.response_mime_type || undefined;
+  const start = Date.now();
+  let outputText = "", runStatus = "ok", errorMessage: string | null = null;
+  let tokensIn, tokensOut;
+  try {
+    const res = await callGemini({
+      model: config.model, systemPrompt: config.system_prompt, userPrompt,
+      temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType,
+    });
+    outputText = res.text; tokensIn = res.tokensInput; tokensOut = res.tokensOutput;
+  } catch (e) {
+    runStatus = "error"; errorMessage = e instanceof Error ? e.message : String(e);
+  }
+  await db.from("pipeline_runs").insert({
+    content_item_id: item.id, step, step_config_id: config.id,
+    provider: config.provider, model: config.model, prompt_sent: userPrompt,
+    output_raw: outputText, tokens_input: tokensIn ?? null, tokens_output: tokensOut ?? null,
+    duration_ms: Date.now() - start, status: runStatus, error_message: errorMessage,
+  });
+  if (runStatus === "error") throw new Error(`Etapa ${step} falhou: ${errorMessage}`);
+  return { text: outputText, config };
+}
+
+// ---- handler ----
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const { content_item_id } = await req.json();
+    const db = adminClient();
+    const { data: item, error } = await db.from("content_items").select("*").eq("id", content_item_id).single();
+    if (error || !item) return json({ error: "content_item não encontrado" }, 404);
+    const { data: source } = await db.from("sources").select("*").eq("id", item.source_id).single();
+
+    await db.from("content_items").update({ status: "understanding" }).eq("id", content_item_id);
+
+    const raw = item.raw_payload ?? {};
+    const rawContent = [raw.text, raw.description, raw.caption, raw.transcript_hint, raw.body]
+      .filter(Boolean).join("\n\n") || JSON.stringify(raw);
+
+    const { text } = await runStep(db, "understand", item, {
+      source_type: source?.type ?? "", source_name: source?.name ?? "",
+      title: item.title ?? "", external_url: item.external_url ?? "", raw_content: rawContent,
+    });
+    const parsed = parseJsonLoose<{ transcript?: string }>(text);
+
+    await db.from("content_items").update({
+      transcript: parsed.transcript ?? null, understanding: parsed, status: "understood",
+    }).eq("id", content_item_id);
+
+    return json({ ok: true, status: "understood" });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+
+################################################################################
+## FUNÇÃO: step-rank   →   cole no editor web na função de mesmo nome
+################################################################################
+
+// ============================================================================
+// ETAPA 2 — Ranking de pautas  (ARQUIVO ÚNICO para o editor web)
+// Cole TODO este conteúdo no editor da função "step-rank" no Dashboard.
+// ============================================================================
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+function adminClient() {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } });
+}
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+async function callGemini(p: { model: string; systemPrompt: string; userPrompt: string; temperature?: number; maxOutputTokens?: number; responseMimeType?: string; }) {
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
+  const body = {
+    systemInstruction: { parts: [{ text: p.systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: p.userPrompt }] }],
+    generationConfig: { temperature: p.temperature ?? 0.7, maxOutputTokens: p.maxOutputTokens ?? 4096, ...(p.responseMimeType ? { responseMimeType: p.responseMimeType } : {}) },
+  };
+  const res = await fetch(`${GEMINI_BASE}/${p.model}:generateContent?key=${apiKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+  const j = await res.json();
+  const text: string = j?.candidates?.[0]?.content?.parts?.map((x: any) => x.text ?? "").join("") ?? "";
+  return { text, tokensInput: j?.usageMetadata?.promptTokenCount, tokensOutput: j?.usageMetadata?.candidatesTokenCount };
+}
+function parseJsonLoose<T = any>(text: string): T {
+  let t = text.trim();
+  if (t.startsWith("```")) t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  return JSON.parse(t) as T;
+}
+async function resolveStepConfig(db: any, step: string, projectId: string) {
+  const { data, error } = await db.from("step_configs").select("*").eq("step", step).eq("is_active", true).or(`project_id.eq.${projectId},project_id.is.null`);
+  if (error) throw error;
+  if (!data?.length) throw new Error(`Nenhuma step_config ativa para "${step}".`);
+  return data.find((c: any) => c.project_id === projectId) ?? data[0];
+}
+function renderTemplate(tpl: string, vars: Record<string, unknown>): string {
+  return tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k: string) => { const v = vars[k]; if (v === undefined || v === null) return ""; return typeof v === "string" ? v : JSON.stringify(v); });
+}
+async function runStep(db: any, step: string, item: any, vars: Record<string, unknown>) {
+  const config = await resolveStepConfig(db, step, item.project_id);
+  const userPrompt = renderTemplate(config.user_prompt_template, vars);
+  const responseMimeType = config.extra?.response_mime_type || undefined;
+  const start = Date.now();
+  let outputText = "", runStatus = "ok", errorMessage: string | null = null, tokensIn, tokensOut;
+  try {
+    const res = await callGemini({ model: config.model, systemPrompt: config.system_prompt, userPrompt, temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType });
+    outputText = res.text; tokensIn = res.tokensInput; tokensOut = res.tokensOutput;
+  } catch (e) { runStatus = "error"; errorMessage = e instanceof Error ? e.message : String(e); }
+  await db.from("pipeline_runs").insert({ content_item_id: item.id, step, step_config_id: config.id, provider: config.provider, model: config.model, prompt_sent: userPrompt, output_raw: outputText, tokens_input: tokensIn ?? null, tokens_output: tokensOut ?? null, duration_ms: Date.now() - start, status: runStatus, error_message: errorMessage });
+  if (runStatus === "error") throw new Error(`Etapa ${step} falhou: ${errorMessage}`);
+  return { text: outputText, config };
+}
+
+// Pautas abaixo desta nota são descartadas.
+const MIN_SCORE = 50;
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const { content_item_id } = await req.json();
+    const db = adminClient();
+    const { data: item, error } = await db.from("content_items").select("*").eq("id", content_item_id).single();
+    if (error || !item) return json({ error: "content_item não encontrado" }, 404);
+    const { data: region } = await db.from("regions").select("name").eq("id", item.region_id).single();
+
+    await db.from("content_items").update({ status: "ranking" }).eq("id", content_item_id);
+
+    const u = item.understanding ?? {};
+    const { text } = await runStep(db, "rank", item, { region_name: region?.name ?? "", summary: u.summary ?? "", facts: u.facts ?? [] });
+    const parsed = parseJsonLoose<{ score?: number; recommend?: boolean }>(text);
+    const score = Number(parsed.score ?? 0);
+    const keep = parsed.recommend !== false && score >= MIN_SCORE;
+
+    await db.from("content_items").update({ rank_score: score, rank_rationale: parsed, status: keep ? "ranked" : "discarded" }).eq("id", content_item_id);
+    return json({ ok: true, score, status: keep ? "ranked" : "discarded" });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+
+################################################################################
+## FUNÇÃO: step-write   →   cole no editor web na função de mesmo nome
+################################################################################
+
+// ============================================================================
+// ETAPA 3 — Escrita  (ARQUIVO ÚNICO para o editor web)
+// Cole TODO este conteúdo no editor da função "step-write" no Dashboard.
+// ============================================================================
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+function adminClient() {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } });
+}
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+async function callGemini(p: { model: string; systemPrompt: string; userPrompt: string; temperature?: number; maxOutputTokens?: number; responseMimeType?: string; }) {
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
+  const body = {
+    systemInstruction: { parts: [{ text: p.systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: p.userPrompt }] }],
+    generationConfig: { temperature: p.temperature ?? 0.7, maxOutputTokens: p.maxOutputTokens ?? 4096, ...(p.responseMimeType ? { responseMimeType: p.responseMimeType } : {}) },
+  };
+  const res = await fetch(`${GEMINI_BASE}/${p.model}:generateContent?key=${apiKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+  const j = await res.json();
+  const text: string = j?.candidates?.[0]?.content?.parts?.map((x: any) => x.text ?? "").join("") ?? "";
+  return { text, tokensInput: j?.usageMetadata?.promptTokenCount, tokensOutput: j?.usageMetadata?.candidatesTokenCount };
+}
+async function resolveStepConfig(db: any, step: string, projectId: string) {
+  const { data, error } = await db.from("step_configs").select("*").eq("step", step).eq("is_active", true).or(`project_id.eq.${projectId},project_id.is.null`);
+  if (error) throw error;
+  if (!data?.length) throw new Error(`Nenhuma step_config ativa para "${step}".`);
+  return data.find((c: any) => c.project_id === projectId) ?? data[0];
+}
+function renderTemplate(tpl: string, vars: Record<string, unknown>): string {
+  return tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k: string) => { const v = vars[k]; if (v === undefined || v === null) return ""; return typeof v === "string" ? v : JSON.stringify(v); });
+}
+async function runStep(db: any, step: string, item: any, vars: Record<string, unknown>) {
+  const config = await resolveStepConfig(db, step, item.project_id);
+  const userPrompt = renderTemplate(config.user_prompt_template, vars);
+  const responseMimeType = config.extra?.response_mime_type || undefined;
+  const start = Date.now();
+  let outputText = "", runStatus = "ok", errorMessage: string | null = null, tokensIn, tokensOut;
+  try {
+    const res = await callGemini({ model: config.model, systemPrompt: config.system_prompt, userPrompt, temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType });
+    outputText = res.text; tokensIn = res.tokensInput; tokensOut = res.tokensOutput;
+  } catch (e) { runStatus = "error"; errorMessage = e instanceof Error ? e.message : String(e); }
+  await db.from("pipeline_runs").insert({ content_item_id: item.id, step, step_config_id: config.id, provider: config.provider, model: config.model, prompt_sent: userPrompt, output_raw: outputText, tokens_input: tokensIn ?? null, tokens_output: tokensOut ?? null, duration_ms: Date.now() - start, status: runStatus, error_message: errorMessage });
+  if (runStatus === "error") throw new Error(`Etapa ${step} falhou: ${errorMessage}`);
+  return { text: outputText, config };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const { content_item_id } = await req.json();
+    const db = adminClient();
+    const { data: item, error } = await db.from("content_items").select("*").eq("id", content_item_id).single();
+    if (error || !item) return json({ error: "content_item não encontrado" }, 404);
+    const { data: region } = await db.from("regions").select("name").eq("id", item.region_id).single();
+
+    await db.from("content_items").update({ status: "writing" }).eq("id", content_item_id);
+
+    const u = item.understanding ?? {}, r = item.rank_rationale ?? {};
+    const { text } = await runStep(db, "write", item, {
+      region_name: region?.name ?? "", suggested_headline: r.suggested_headline ?? "", discover_angle: r.discover_angle ?? "",
+      summary: u.summary ?? "", facts: u.facts ?? [], transcript: item.transcript ?? "",
+    });
+
+    await db.from("content_items").update({ draft: text, status: "written" }).eq("id", content_item_id);
+    return json({ ok: true, status: "written" });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+
+################################################################################
+## FUNÇÃO: step-polish   →   cole no editor web na função de mesmo nome
+################################################################################
+
+// ============================================================================
+// ETAPA 4 — Polimento editorial + SEO  (ARQUIVO ÚNICO para o editor web)
+// Cole TODO este conteúdo no editor da função "step-polish" no Dashboard.
+// ============================================================================
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+function adminClient() {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } });
+}
+const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+async function callGemini(p: { model: string; systemPrompt: string; userPrompt: string; temperature?: number; maxOutputTokens?: number; responseMimeType?: string; }) {
+  const apiKey = Deno.env.get("GEMINI_API_KEY");
+  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
+  const body = {
+    systemInstruction: { parts: [{ text: p.systemPrompt }] },
+    contents: [{ role: "user", parts: [{ text: p.userPrompt }] }],
+    generationConfig: { temperature: p.temperature ?? 0.7, maxOutputTokens: p.maxOutputTokens ?? 4096, ...(p.responseMimeType ? { responseMimeType: p.responseMimeType } : {}) },
+  };
+  const res = await fetch(`${GEMINI_BASE}/${p.model}:generateContent?key=${apiKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+  const j = await res.json();
+  const text: string = j?.candidates?.[0]?.content?.parts?.map((x: any) => x.text ?? "").join("") ?? "";
+  return { text, tokensInput: j?.usageMetadata?.promptTokenCount, tokensOutput: j?.usageMetadata?.candidatesTokenCount };
+}
+function parseJsonLoose<T = any>(text: string): T {
+  let t = text.trim();
+  if (t.startsWith("```")) t = t.replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/i, "").trim();
+  return JSON.parse(t) as T;
+}
+async function resolveStepConfig(db: any, step: string, projectId: string) {
+  const { data, error } = await db.from("step_configs").select("*").eq("step", step).eq("is_active", true).or(`project_id.eq.${projectId},project_id.is.null`);
+  if (error) throw error;
+  if (!data?.length) throw new Error(`Nenhuma step_config ativa para "${step}".`);
+  return data.find((c: any) => c.project_id === projectId) ?? data[0];
+}
+function renderTemplate(tpl: string, vars: Record<string, unknown>): string {
+  return tpl.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, k: string) => { const v = vars[k]; if (v === undefined || v === null) return ""; return typeof v === "string" ? v : JSON.stringify(v); });
+}
+async function runStep(db: any, step: string, item: any, vars: Record<string, unknown>) {
+  const config = await resolveStepConfig(db, step, item.project_id);
+  const userPrompt = renderTemplate(config.user_prompt_template, vars);
+  const responseMimeType = config.extra?.response_mime_type || undefined;
+  const start = Date.now();
+  let outputText = "", runStatus = "ok", errorMessage: string | null = null, tokensIn, tokensOut;
+  try {
+    const res = await callGemini({ model: config.model, systemPrompt: config.system_prompt, userPrompt, temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType });
+    outputText = res.text; tokensIn = res.tokensInput; tokensOut = res.tokensOutput;
+  } catch (e) { runStatus = "error"; errorMessage = e instanceof Error ? e.message : String(e); }
+  await db.from("pipeline_runs").insert({ content_item_id: item.id, step, step_config_id: config.id, provider: config.provider, model: config.model, prompt_sent: userPrompt, output_raw: outputText, tokens_input: tokensIn ?? null, tokens_output: tokensOut ?? null, duration_ms: Date.now() - start, status: runStatus, error_message: errorMessage });
+  if (runStatus === "error") throw new Error(`Etapa ${step} falhou: ${errorMessage}`);
+  return { text: outputText, config };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const { content_item_id } = await req.json();
+    const db = adminClient();
+    const { data: item, error } = await db.from("content_items").select("*").eq("id", content_item_id).single();
+    if (error || !item) return json({ error: "content_item não encontrado" }, 404);
+    const { data: region } = await db.from("regions").select("name").eq("id", item.region_id).single();
+
+    await db.from("content_items").update({ status: "polishing" }).eq("id", content_item_id);
+
+    const r = item.rank_rationale ?? {};
+    const { text } = await runStep(db, "polish", item, { region_name: region?.name ?? "", search_keywords: r.search_keywords ?? [], draft: item.draft ?? "" });
+    const parsed = parseJsonLoose<{ article_markdown?: string; seo?: unknown }>(text);
+
+    await db.from("content_items").update({ final_article: parsed.article_markdown ?? item.draft, seo: parsed.seo ?? null, status: "ready" }).eq("id", content_item_id);
+    return json({ ok: true, status: "ready" });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+
+################################################################################
+## FUNÇÃO: pipeline-orchestrator   →   cole no editor web na função de mesmo nome
+################################################################################
+
+// ============================================================================
+// ORQUESTRADOR  (ARQUIVO ÚNICO para o editor web)
+// Cole TODO este conteúdo no editor da função "pipeline-orchestrator".
+// ============================================================================
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+function adminClient() {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+const NEXT: Record<string, string> = {
+  captured: "step-understand", understood: "step-rank", ranked: "step-write", written: "step-polish",
+};
+const BATCH = 5;
+
+async function invokeFunction(name: string, body: unknown) {
+  const base = Deno.env.get("SUPABASE_URL")!;
+  const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const res = await fetch(`${base}/functions/v1/${name}`, {
+    method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Bearer ${key}` }, body: JSON.stringify(body),
+  });
+  return { ok: res.ok, status: res.status };
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const db = adminClient();
+    const statuses = Object.keys(NEXT);
+    const { data: items, error } = await db.from("content_items").select("id, status").in("status", statuses).order("captured_at", { ascending: true }).limit(BATCH);
+    if (error) throw error;
+    const results: unknown[] = [];
+    for (const it of items ?? []) {
+      const fn = NEXT[it.status as string];
+      if (!fn) continue;
+      const r = await invokeFunction(fn, { content_item_id: it.id });
+      results.push({ id: it.id, from: it.status, fn, ok: r.ok });
+    }
+    return json({ ok: true, processed: results.length, results });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+
+################################################################################
+## FUNÇÃO: ingest-cron   →   cole no editor web na função de mesmo nome
+################################################################################
+
+// ============================================================================
+// INGEST — detecção de novidades nas fontes  (ARQUIVO ÚNICO para o editor web)
+// Cole TODO este conteúdo no editor da função "ingest-cron".
+// ============================================================================
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+function adminClient() {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } });
+}
+
+// ---- adaptadores de fonte (inlined) ----
+interface NewItem { external_id: string; external_url: string; title: string; raw_payload: Record<string, unknown>; }
+interface FetchResult { items: NewItem[]; newMarker: string | null; }
+
+async function sha256(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function parseFeed(xml: string): NewItem[] {
+  const items: NewItem[] = [];
+  const blocks = xml.match(/<(item|entry)[\s\S]*?<\/\1>/g) ?? [];
+  for (const b of blocks) {
+    const get = (tag: string) => {
+      const m = b.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`, "i"));
+      return m ? m[1].replace(/<!\[CDATA\[|\]\]>/g, "").trim() : "";
+    };
+    let link = get("link");
+    if (!link) { const m = b.match(/<link[^>]*href=["']([^"']+)["']/i); link = m ? m[1] : ""; }
+    const id = get("guid") || get("id") || link;
+    const title = get("title");
+    const desc = get("description") || get("summary") || get("content");
+    if (!id) continue;
+    items.push({ external_id: id, external_url: link || id, title, raw_payload: { description: desc, link, source_format: "feed" } });
+  }
+  return items;
+}
+async function fetchText(url: string): Promise<string> {
+  const res = await fetch(url, { headers: { "User-Agent": "DesertoDeNoticiasBot/1.0" } });
+  if (!res.ok) throw new Error(`fetch ${url} -> ${res.status}`);
+  return await res.text();
+}
+function youtubeFeedUrl(source: any): string | null {
+  const channelId = source.config?.channel_id;
+  if (channelId) return `https://www.youtube.com/feeds/videos.xml?channel_id=${channelId}`;
+  if (source.url.includes("feeds/videos.xml")) return source.url;
+  return null;
+}
+async function fromFeedLike(source: any, lastMarker: string | null, feedUrl: string): Promise<FetchResult> {
+  const xml = await fetchText(feedUrl);
+  const all = parseFeed(xml);
+  const newMarker = all[0]?.external_id ?? lastMarker;
+  let fresh = all;
+  if (lastMarker) { const idx = all.findIndex((i) => i.external_id === lastMarker); fresh = idx === -1 ? all : all.slice(0, idx); }
+  return { items: fresh, newMarker };
+}
+async function fromWebsite(source: any, lastMarker: string | null): Promise<FetchResult> {
+  if (source.config?.rss || source.url.match(/\.(xml|rss)(\?|$)/) || source.url.includes("/feed")) {
+    return fromFeedLike(source, lastMarker, source.url);
+  }
+  const html = await fetchText(source.url);
+  const hash = await sha256(html);
+  if (hash === lastMarker) return { items: [], newMarker: hash };
+  return { items: [{ external_id: `${source.url}#${hash.slice(0, 12)}`, external_url: source.url, title: source.name, raw_payload: { body: html.slice(0, 200000), source_format: "html_snapshot" } }], newMarker: hash };
+}
+async function fetchNewItems(source: any): Promise<FetchResult> {
+  const last = source.last_seen_marker;
+  switch (source.type) {
+    case "youtube": {
+      const feed = youtubeFeedUrl(source);
+      if (!feed) { console.warn(`[youtube] sem channel_id/feed: ${source.url}`); return { items: [], newMarker: last }; }
+      return fromFeedLike(source, last, feed);
+    }
+    case "diario_oficial":
+    case "website": return fromWebsite(source, last);
+    case "instagram":
+    case "tiktok":
+      // TODO: plugar provedor externo (ex.: Apify). Retorna vazio até configurar.
+      console.warn(`[${source.type}] não implementado sem provedor externo: ${source.url}`);
+      return { items: [], newMarker: last };
+    default: return { items: [], newMarker: last };
+  }
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const db = adminClient();
+    const now = Date.now();
+    const { data: sources, error } = await db.from("sources").select("*").eq("is_active", true);
+    if (error) throw error;
+    const report: unknown[] = [];
+
+    for (const s of sources ?? []) {
+      if (s.last_checked_at) {
+        const due = new Date(s.last_checked_at).getTime() + s.check_interval_minutes * 60000;
+        if (now < due) continue;
+      }
+      const { data: region } = await db.from("regions").select("id, project_id").eq("id", s.region_id).single();
+      if (!region) continue;
+
+      let created = 0, errMsg: string | null = null, newMarker = s.last_seen_marker;
+      try {
+        const result = await fetchNewItems(s);
+        newMarker = result.newMarker;
+        for (const it of result.items) {
+          const { error: insErr } = await db.from("content_items").insert({
+            source_id: s.id, region_id: region.id, project_id: region.project_id,
+            external_id: it.external_id, external_url: it.external_url, title: it.title,
+            raw_payload: it.raw_payload, status: "captured",
+          });
+          if (!insErr) created++;
+        }
+      } catch (e) { errMsg = e instanceof Error ? e.message : String(e); }
+
+      await db.from("sources").update({ last_checked_at: new Date().toISOString(), last_seen_marker: newMarker }).eq("id", s.id);
+      report.push({ source: s.name, type: s.type, created, error: errMsg });
+    }
+    return json({ ok: true, checked: report.length, report });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+
+################################################################################
+## FUNÇÃO: publish-wordpress   →   cole no editor web na função de mesmo nome
+################################################################################
+
+// ============================================================================
+// PUBLICAÇÃO no WordPress  (ARQUIVO ÚNICO para o editor web)
+// Cole TODO este conteúdo no editor da função "publish-wordpress".
+// ============================================================================
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+}
+function adminClient() {
+  return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+    { auth: { persistSession: false, autoRefreshToken: false } });
+}
+function mdToHtml(md: string): string {
+  const out: string[] = [];
+  for (const line of md.split("\n")) {
+    const h = line.match(/^(#{1,6})\s+(.*)$/);
+    if (h) { out.push(`<h${h[1].length}>${h[2]}</h${h[1].length}>`); continue; }
+    if (line.trim() === "") { out.push(""); continue; }
+    const t = line.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*(.+?)\*/g, "<em>$1</em>");
+    out.push(`<p>${t}</p>`);
+  }
+  return out.join("\n");
+}
+
+Deno.serve(async (req) => {
+  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+  try {
+    const { content_item_id, status = "draft" } = await req.json();
+    const db = adminClient();
+    const { data: item, error } = await db.from("content_items").select("*").eq("id", content_item_id).single();
+    if (error || !item) return json({ error: "content_item não encontrado" }, 404);
+    if (item.status !== "ready") return json({ error: `item não está 'ready' (status: ${item.status})` }, 409);
+
+    const { data: project } = await db.from("projects").select("*").eq("id", item.project_id).single();
+    if (!project?.wordpress_base_url) return json({ error: "projeto sem WordPress configurado" }, 400);
+
+    const appPw = Deno.env.get(project.wordpress_app_password_secret ?? "") ?? Deno.env.get("WORDPRESS_APP_PASSWORD");
+    if (!appPw) return json({ error: "senha de aplicação do WordPress ausente" }, 400);
+
+    const seo = item.seo ?? {};
+    const auth = btoa(`${project.wordpress_username}:${appPw}`);
+    const endpoint = `${project.wordpress_base_url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
+
+    await db.from("content_items").update({ status: "publishing" }).eq("id", content_item_id);
+
+    const res = await fetch(endpoint, {
+      method: "POST", headers: { "Content-Type": "application/json", "Authorization": `Basic ${auth}` },
+      body: JSON.stringify({
+        title: seo.title || item.title || "Sem título", slug: seo.slug || undefined,
+        content: mdToHtml(item.final_article ?? ""), excerpt: seo.meta_description || undefined, status,
+      }),
+    });
+    const wpBody = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      await db.from("content_items").update({ status: "ready", error_message: `WP ${res.status}` }).eq("id", content_item_id);
+      await db.from("publications").insert({ content_item_id, project_id: item.project_id, status: "failed", response: wpBody });
+      return json({ error: "falha ao publicar", wp: wpBody }, 502);
+    }
+
+    await db.from("content_items").update({ status: "published" }).eq("id", content_item_id);
+    await db.from("publications").insert({
+      content_item_id, project_id: item.project_id, wordpress_post_id: String(wpBody.id ?? ""),
+      wordpress_url: wpBody.link ?? null, status: "published", response: wpBody, published_at: new Date().toISOString(),
+    });
+    return json({ ok: true, wordpress_url: wpBody.link, post_id: wpBody.id });
+  } catch (e) {
+    return json({ error: e instanceof Error ? e.message : String(e) }, 500);
+  }
+});
+
+
