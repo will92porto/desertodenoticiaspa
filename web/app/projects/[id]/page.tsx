@@ -6,24 +6,26 @@ export const dynamic = "force-dynamic";
 async function addRegion(formData: FormData) {
   "use server";
   const db = supabaseAdmin();
-  await db.from("regions").insert({
+  const { error } = await db.from("regions").insert({
     project_id: String(formData.get("project_id")),
     name: String(formData.get("name")),
     state: String(formData.get("state") || "") || null,
   });
+  if (error) throw new Error(`Falha ao criar região: ${error.message} (code: ${error.code})`);
   revalidatePath(`/projects/${formData.get("project_id")}`);
 }
 
 async function addSource(formData: FormData) {
   "use server";
   const db = supabaseAdmin();
-  await db.from("sources").insert({
+  const { error } = await db.from("sources").insert({
     region_id: String(formData.get("region_id")),
     type: String(formData.get("type")),
     name: String(formData.get("name")),
     url: String(formData.get("url")),
     check_interval_minutes: Number(formData.get("interval") || 60),
   });
+  if (error) throw new Error(`Falha ao criar fonte: ${error.message} (code: ${error.code})`);
   revalidatePath(`/projects/${formData.get("project_id")}`);
 }
 

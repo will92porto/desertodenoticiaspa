@@ -10,7 +10,7 @@ async function createProject(formData: FormData) {
   const slug = String(formData.get("slug") || "").trim() ||
     name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
         .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  await db.from("projects").insert({
+  const { error } = await db.from("projects").insert({
     name,
     slug,
     description: String(formData.get("description") || ""),
@@ -18,6 +18,11 @@ async function createProject(formData: FormData) {
     wordpress_username: String(formData.get("wp_user") || "") || null,
     wordpress_app_password_secret: String(formData.get("wp_secret") || "") || null,
   });
+  // Não mascara falha: se o insert falhar (RLS, env faltando, tabela ausente),
+  // o erro aparece em vez de redirecionar como se tivesse salvo.
+  if (error) {
+    throw new Error(`Falha ao criar projeto: ${error.message} (code: ${error.code})`);
+  }
   redirect("/projects");
 }
 
