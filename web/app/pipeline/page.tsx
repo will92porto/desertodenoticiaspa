@@ -1,27 +1,39 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { supabaseAdmin, invokeFunction } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
 
+// Executa uma chamada de função e mostra o resultado/erro na própria tela
+// (via query param), em vez de falhar em silêncio.
+async function runAndReport(label: string, fn: string, body: unknown) {
+  let msg: string;
+  try {
+    const r = await invokeFunction(fn, body);
+    msg = `${label}: ${JSON.stringify(r)}`;
+  } catch (e) {
+    msg = `${label} ERRO: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  revalidatePath("/pipeline");
+  redirect(`/pipeline?msg=${encodeURIComponent(msg.slice(0, 500))}`);
+}
+
 async function runOrchestrator() {
   "use server";
-  await invokeFunction("pipeline-orchestrator", {});
-  revalidatePath("/pipeline");
+  await runAndReport("Avançar", "pipeline-orchestrator", {});
 }
 
 async function runIngest() {
   "use server";
-  await invokeFunction("ingest-cron", {});
-  revalidatePath("/pipeline");
+  await runAndReport("Captar", "ingest-cron", {});
 }
 
 async function publish(formData: FormData) {
   "use server";
-  await invokeFunction("publish-wordpress", {
+  await runAndReport("Publicar", "publish-wordpress", {
     content_item_id: String(formData.get("id")),
     status: "draft",
   });
-  revalidatePath("/pipeline");
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -32,7 +44,9 @@ const STATUS_LABEL: Record<string, string> = {
   published: "publicado", error: "erro",
 };
 
-export default async function PipelinePage() {
+export default async function PipelinePage(
+  { searchParams }: { searchParams: { msg?: string } },
+) {
   const db = supabaseAdmin();
   const { data: items } = await db
     .from("content_items")
@@ -42,6 +56,11 @@ export default async function PipelinePage() {
 
   return (
     <div>
+      {searchParams?.msg && (
+        <div className="card" style={{ borderColor: "var(--accent)", whiteSpace: "pre-wrap", fontSize: 13 }}>
+          {searchParams.msg}
+        </div>
+      )}
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h2>Pipeline</h2>
         <div className="row">

@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -11,8 +12,12 @@ async function addRegion(formData: FormData) {
     name: String(formData.get("name")),
     state: String(formData.get("state") || "") || null,
   });
-  if (error) throw new Error(`Falha ao criar região: ${error.message} (code: ${error.code})`);
-  revalidatePath(`/projects/${formData.get("project_id")}`);
+  const pid = String(formData.get("project_id"));
+  // Em vez de quebrar a página, mostra o erro real na própria tela via query param.
+  if (error) {
+    redirect(`/projects/${pid}?erro=${encodeURIComponent(`Região: ${error.message} (${error.code})`)}`);
+  }
+  revalidatePath(`/projects/${pid}`);
 }
 
 async function addSource(formData: FormData) {
@@ -25,11 +30,16 @@ async function addSource(formData: FormData) {
     url: String(formData.get("url")),
     check_interval_minutes: Number(formData.get("interval") || 60),
   });
-  if (error) throw new Error(`Falha ao criar fonte: ${error.message} (code: ${error.code})`);
-  revalidatePath(`/projects/${formData.get("project_id")}`);
+  const pid = String(formData.get("project_id"));
+  if (error) {
+    redirect(`/projects/${pid}?erro=${encodeURIComponent(`Fonte: ${error.message} (${error.code})`)}`);
+  }
+  revalidatePath(`/projects/${pid}`);
 }
 
-export default async function ProjectDetail({ params }: { params: { id: string } }) {
+export default async function ProjectDetail(
+  { params, searchParams }: { params: { id: string }; searchParams: { erro?: string } },
+) {
   const db = supabaseAdmin();
   const { data: project } = await db.from("projects").select("*").eq("id", params.id).single();
   const { data: regions } = await db
@@ -39,6 +49,11 @@ export default async function ProjectDetail({ params }: { params: { id: string }
 
   return (
     <div>
+      {searchParams?.erro && (
+        <div className="card" style={{ borderColor: "var(--red)", color: "var(--red)" }}>
+          Erro ao salvar — {searchParams.erro}
+        </div>
+      )}
       <h2>{project.name}</h2>
       <p className="muted">{project.description}</p>
 
