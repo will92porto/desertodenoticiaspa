@@ -54,6 +54,30 @@ function youtubeFeedUrl(source: any): string | null {
   if (source.url.includes("feeds/videos.xml")) return source.url;
   return null;
 }
+// Descobre o channel_id automaticamente a partir de QUALQUER URL do YouTube
+// (canal, /@handle, /c/, /user/, ou até um vídeo): baixa a página e extrai
+// o identificador que o YouTube embute no HTML.
+async function resolveYoutubeFeed(source: any): Promise<string | null> {
+  const direct = youtubeFeedUrl(source);
+  if (direct) return direct;
+  try {
+    const html = await fetchText(source.url);
+    // O YouTube embute o canal de várias formas; tentamos as mais comuns.
+    const patterns = [
+      /"channelId":"(UC[\w-]{20,})"/,
+      /"externalId":"(UC[\w-]{20,})"/,
+      /channel_id=(UC[\w-]{20,})/,
+      /\/channel\/(UC[\w-]{20,})/,
+    ];
+    for (const re of patterns) {
+      const m = html.match(re);
+      if (m) return `https://www.youtube.com/feeds/videos.xml?channel_id=${m[1]}`;
+    }
+  } catch (e) {
+    console.warn(`[youtube] falha ao descobrir channel_id de ${source.url}: ${e}`);
+  }
+  return null;
+}
 async function fromFeedLike(source: any, lastMarker: string | null, feedUrl: string): Promise<FetchResult> {
   const xml = await fetchText(feedUrl);
   const all = parseFeed(xml);
@@ -75,8 +99,8 @@ async function fetchNewItems(source: any): Promise<FetchResult> {
   const last = source.last_seen_marker;
   switch (source.type) {
     case "youtube": {
-      const feed = youtubeFeedUrl(source);
-      if (!feed) { console.warn(`[youtube] sem channel_id/feed: ${source.url}`); return { items: [], newMarker: last }; }
+      const feed = await resolveYoutubeFeed(source);
+      if (!feed) { console.warn(`[youtube] não foi possível resolver o canal: ${source.url}`); return { items: [], newMarker: last }; }
       return fromFeedLike(source, last, feed);
     }
     case "diario_oficial":

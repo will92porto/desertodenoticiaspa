@@ -1,4 +1,5 @@
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { supabaseAdmin, invokeFunction } from "@/lib/supabase";
 
 export const dynamic = "force-dynamic";
@@ -12,12 +13,23 @@ const STEP_FN: Record<string, string> = {
 
 async function runOneStep(formData: FormData) {
   "use server";
-  const fn = STEP_FN[String(formData.get("step"))];
-  await invokeFunction(fn, { content_item_id: String(formData.get("id")) });
-  revalidatePath(`/pipeline/${formData.get("id")}`);
+  const id = String(formData.get("id"));
+  const step = String(formData.get("step"));
+  const fn = STEP_FN[step];
+  let msg: string;
+  try {
+    const r = await invokeFunction(fn, { content_item_id: id });
+    msg = `${step}: ${JSON.stringify(r)}`;
+  } catch (e) {
+    msg = `${step} ERRO: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  revalidatePath(`/pipeline/${id}`);
+  redirect(`/pipeline/${id}?msg=${encodeURIComponent(msg.slice(0, 500))}`);
 }
 
-export default async function ItemDetail({ params }: { params: { id: string } }) {
+export default async function ItemDetail(
+  { params, searchParams }: { params: { id: string }; searchParams: { msg?: string } },
+) {
   const db = supabaseAdmin();
   const { data: item } = await db.from("content_items").select("*").eq("id", params.id).single();
   const { data: runs } = await db
@@ -30,6 +42,11 @@ export default async function ItemDetail({ params }: { params: { id: string } })
 
   return (
     <div>
+      {searchParams?.msg && (
+        <div className="card" style={{ borderColor: "var(--accent)", whiteSpace: "pre-wrap", fontSize: 13 }}>
+          {searchParams.msg}
+        </div>
+      )}
       <h2>{item.title || "(sem título)"}</h2>
       <p><span className="badge">{item.status}</span>{" "}
         {item.external_url && <a className="muted" href={item.external_url} target="_blank">fonte ↗</a>}
