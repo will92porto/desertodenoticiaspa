@@ -47,12 +47,21 @@ function renderTemplate(tpl: string, vars: Record<string, unknown>): string {
 }
 async function runStep(db: any, step: string, item: any, vars: Record<string, unknown>) {
   const config = await resolveStepConfig(db, step, item.project_id);
-  const userPrompt = renderTemplate(config.user_prompt_template, vars);
+  // Injeta a DATA ATUAL para o modelo não rejeitar eventos por achar que está
+  // num ano anterior (o conhecimento do modelo tem corte temporal).
+  const hoje = new Date().toISOString().slice(0, 10);
+  const varsComData = { ...vars, data_atual: hoje };
+  const userPrompt = renderTemplate(config.user_prompt_template, varsComData);
+  const systemPrompt =
+    `CONTEXTO TEMPORAL: a data de hoje é ${hoje}. Trate esta data como verdade ` +
+    `absoluta; NÃO use seu conhecimento de treinamento para julgar se um ano é ` +
+    `passado ou futuro. Eventos com data até hoje são fatos já ocorridos e podem ` +
+    `ser noticiados normalmente.\n\n` + config.system_prompt;
   const responseMimeType = config.extra?.response_mime_type || undefined;
   const start = Date.now();
   let outputText = "", runStatus = "ok", errorMessage: string | null = null, tokensIn, tokensOut;
   try {
-    const res = await callGemini({ model: config.model, systemPrompt: config.system_prompt, userPrompt, temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType });
+    const res = await callGemini({ model: config.model, systemPrompt, userPrompt, temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType });
     outputText = res.text; tokensIn = res.tokensInput; tokensOut = res.tokensOutput;
   } catch (e) { runStatus = "error"; errorMessage = e instanceof Error ? e.message : String(e); }
   await db.from("pipeline_runs").insert({ content_item_id: item.id, step, step_config_id: config.id, provider: config.provider, model: config.model, prompt_sent: userPrompt, output_raw: outputText, tokens_input: tokensIn ?? null, tokens_output: tokensOut ?? null, duration_ms: Date.now() - start, status: runStatus, error_message: errorMessage });

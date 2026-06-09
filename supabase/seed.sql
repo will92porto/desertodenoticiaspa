@@ -37,7 +37,12 @@ URL: {{external_url}}
 CONTEÚDO BRUTO CAPTADO:
 {{raw_content}}
 
-Compreenda e estruture o conteúdo acima conforme as instruções.$usr$,
+Se um VÍDEO foi anexado a esta mensagem, transcreva integralmente o áudio falado
+(em pt-BR) no campo "transcript", e descreva brevemente elementos visuais
+relevantes. Use o vídeo como fonte primária; o texto acima é só contexto.
+Caso não haja vídeo, baseie-se apenas no conteúdo bruto.
+
+Compreenda e estruture o conteúdo conforme as instruções.$usr$,
 '{"response_mime_type":"application/json"}'::jsonb
 );
 

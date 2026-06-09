@@ -30,12 +30,20 @@ const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
 async function callGemini(p: {
   model: string; systemPrompt: string; userPrompt: string;
   temperature?: number; maxOutputTokens?: number; responseMimeType?: string;
+  // Quando presente, envia o vídeo do YouTube para o Gemini processar (transcrição
+  // real do áudio + leitura visual), sem precisar baixar o arquivo.
+  youtubeUrl?: string;
 }) {
   const apiKey = Deno.env.get("GEMINI_API_KEY");
   if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
+  const parts: any[] = [];
+  if (p.youtubeUrl) {
+    parts.push({ fileData: { fileUri: p.youtubeUrl } });
+  }
+  parts.push({ text: p.userPrompt });
   const body = {
     systemInstruction: { parts: [{ text: p.systemPrompt }] },
-    contents: [{ role: "user", parts: [{ text: p.userPrompt }] }],
+    contents: [{ role: "user", parts }],
     generationConfig: {
       temperature: p.temperature ?? 0.7,
       maxOutputTokens: p.maxOutputTokens ?? 4096,
@@ -74,17 +82,29 @@ function renderTemplate(tpl: string, vars: Record<string, unknown>): string {
 }
 
 // ---- executa a etapa (config -> prompt -> Gemini -> log) ----
-async function runStep(db: any, step: string, item: any, vars: Record<string, unknown>) {
+async function runStep(db: any, step: string, item: any, vars: Record<string, unknown>, youtubeUrl?: string) {
   const config = await resolveStepConfig(db, step, item.project_id);
-  const userPrompt = renderTemplate(config.user_prompt_template, vars);
+  // Injeta a DATA ATUAL para o modelo não rejeitar eventos por achar que está
+  // num ano anterior (o conhecimento do modelo tem corte temporal).
+  const hoje = new Date().toISOString().slice(0, 10);
+  const varsComData = { ...vars, data_atual: hoje };
+  const userPrompt = renderTemplate(config.user_prompt_template, varsComData);
+  const systemPrompt =
+    `CONTEXTO TEMPORAL: a data de hoje é ${hoje}. Trate esta data como verdade ` +
+    `absoluta; NÃO use seu conhecimento de treinamento para julgar se um ano é ` +
+    `passado ou futuro. Eventos com data até hoje são fatos já ocorridos e podem ` +
+    `ser noticiados normalmente.\n\n` + config.system_prompt;
   const responseMimeType = config.extra?.response_mime_type || undefined;
   const start = Date.now();
   let outputText = "", runStatus = "ok", errorMessage: string | null = null;
   let tokensIn, tokensOut;
   try {
     const res = await callGemini({
-      model: config.model, systemPrompt: config.system_prompt, userPrompt,
-      temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType,
+      model: config.model, systemPrompt, userPrompt,
+      temperature: config.temperature,
+      // Transcrição de vídeo pode ser longa: garante teto alto quando há vídeo.
+      maxOutputTokens: youtubeUrl ? Math.max(config.max_output_tokens, 8192) : config.max_output_tokens,
+      responseMimeType, youtubeUrl,
     });
     outputText = res.text; tokensIn = res.tokensInput; tokensOut = res.tokensOutput;
   } catch (e) {
@@ -116,10 +136,16 @@ Deno.serve(async (req) => {
     const rawContent = [raw.text, raw.description, raw.caption, raw.transcript_hint, raw.body]
       .filter(Boolean).join("\n\n") || JSON.stringify(raw);
 
+    // Se a fonte for YouTube, envia a URL do vídeo para o Gemini transcrever o
+    // áudio de verdade (processamento no lado do Google, sem baixar o arquivo).
+    const ytUrl = source?.type === "youtube"
+      ? (item.external_url || raw.link as string | undefined)
+      : undefined;
+
     const { text } = await runStep(db, "understand", item, {
       source_type: source?.type ?? "", source_name: source?.name ?? "",
       title: item.title ?? "", external_url: item.external_url ?? "", raw_content: rawContent,
-    });
+    }, ytUrl);
     const parsed = parseJsonLoose<{ transcript?: string }>(text);
 
     await db.from("content_items").update({
