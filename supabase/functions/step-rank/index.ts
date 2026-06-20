@@ -35,17 +35,60 @@ Deno.serve(async (req) => {
       facts: u.facts ?? [],
     });
 
-    const parsed = parseJsonLoose<{ score?: number; recommend?: boolean }>(text);
-    const score = Number(parsed.score ?? 0);
-    const keep = parsed.recommend !== false && score >= MIN_SCORE;
+    const parsed = parseJsonLoose<{ pautas?: Array<{ score?: number; recommend?: boolean }> }>(text);
+    
+    // Backward compatibility: if the model returns the old format (single object)
+    let pautasList = parsed.pautas;
+    if (!pautasList || !Array.isArray(pautasList)) {
+      if ('score' in parsed) {
+        pautasList = [parsed as any];
+      } else {
+        pautasList = [];
+      }
+    }
 
+    const validPautas = pautasList.filter(p => {
+      const s = Number(p.score ?? 0);
+      return p.recommend !== false && s >= MIN_SCORE;
+    });
+
+    if (validPautas.length === 0) {
+      await db.from("content_items").update({
+        status: "discarded",
+      }).eq("id", content_item_id);
+      return json({ ok: true, status: "discarded", count: 0 });
+    }
+
+    // A primeira pauta atualiza o item original
+    const firstPauta = validPautas[0];
     await db.from("content_items").update({
-      rank_score: score,
-      rank_rationale: parsed,
-      status: keep ? "ranked" : "discarded",
+      rank_score: Number(firstPauta.score ?? 0),
+      rank_rationale: firstPauta,
+      status: "ranked",
     }).eq("id", content_item_id);
 
-    return json({ ok: true, score, status: keep ? "ranked" : "discarded" });
+    // As demais pautas viram novos content_items
+    for (let i = 1; i < validPautas.length; i++) {
+      const pauta = validPautas[i];
+      const newExternalId = `${item.external_id}#pauta-${i}`;
+      
+      await db.from("content_items").insert({
+        source_id: item.source_id,
+        region_id: item.region_id,
+        project_id: item.project_id,
+        external_id: newExternalId,
+        external_url: item.external_url,
+        title: item.title,
+        raw_payload: item.raw_payload,
+        transcript: item.transcript,
+        understanding: item.understanding,
+        rank_score: Number(pauta.score ?? 0),
+        rank_rationale: pauta,
+        status: "ranked"
+      });
+    }
+
+    return json({ ok: true, status: "ranked", count: validPautas.length });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

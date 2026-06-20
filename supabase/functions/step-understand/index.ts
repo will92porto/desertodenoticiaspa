@@ -7,6 +7,7 @@ import { runStep } from "../_shared/runStep.ts";
 import { parseJsonLoose } from "../_shared/gemini.ts";
 import { json, handleOptions } from "../_shared/http.ts";
 import type { ContentItem, Source } from "../_shared/types.ts";
+import { fetchYoutubeTranscript } from "../_shared/youtubeTranscriptService.ts";
 
 Deno.serve(async (req) => {
   const pre = handleOptions(req);
@@ -27,9 +28,26 @@ Deno.serve(async (req) => {
 
     // Monta o "conteúdo bruto" a partir do payload captado.
     const raw = item.raw_payload ?? {};
-    const rawContent = [
+    let rawContent = [
       raw.text, raw.description, raw.caption, raw.transcript_hint, raw.body,
     ].filter(Boolean).join("\n\n") || JSON.stringify(raw);
+
+    let nativeTranscript: string | null = null;
+    const sourceType = (source as Source)?.type ?? "";
+
+    if (sourceType === "youtube" && item.external_url) {
+      // Extrai o ID do vídeo (ex: v=12345678901 ou youtu.be/12345678901)
+      const match = item.external_url.match(/(?:v=|youtu\.be\/)([^&]+)/);
+      if (match && match[1]) {
+        const videoId = match[1];
+        nativeTranscript = await fetchYoutubeTranscript(videoId);
+        if (nativeTranscript) {
+          // Trunca para análise rápida (economia de tokens)
+          const excerpt = nativeTranscript.substring(0, 2500);
+          rawContent = rawContent ? `${rawContent}\n\n[Transcrição]: ${excerpt}` : `[Transcrição]: ${excerpt}`;
+        }
+      }
+    }
 
     const { text } = await runStep(db, "understand", item as ContentItem, {
       source_type: (source as Source)?.type ?? "",
@@ -41,8 +59,16 @@ Deno.serve(async (req) => {
 
     const parsed = parseJsonLoose<{ transcript?: string }>(text);
 
+    // Se temos a transcrição nativa, garantimos que ela não exceda o limite de ~40k antes de salvar
+    let finalTranscript = parsed.transcript ?? null;
+    if (nativeTranscript) {
+      finalTranscript = nativeTranscript.length > 40000 
+        ? nativeTranscript.substring(0, 40000) + "\n\n[...transcrição truncada por limite de tamanho...]"
+        : nativeTranscript;
+    }
+
     await db.from("content_items").update({
-      transcript: parsed.transcript ?? null,
+      transcript: finalTranscript,
       understanding: parsed,
       status: "understood",
     }).eq("id", content_item_id);

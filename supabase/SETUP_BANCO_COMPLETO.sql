@@ -229,6 +229,12 @@ create table if not exists publications (
 
 create index on publications (content_item_id);
 
+create table if not exists kv_cache (
+  key text primary key,
+  value jsonb not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- -----------------------------------------------------------------------------
 -- TRIGGERS: updated_at automático
 -- -----------------------------------------------------------------------------
@@ -268,6 +274,7 @@ alter table content_items  enable row level security;
 alter table step_configs   enable row level security;
 alter table pipeline_runs  enable row level security;
 alter table publications   enable row level security;
+alter table kv_cache       enable row level security;
 
 -- Política reutilizável: usuários autenticados podem tudo.
 -- (A service role das Edge Functions ignora RLS por padrão.)
@@ -277,7 +284,7 @@ declare t text;
 begin
   foreach t in array array[
     'projects','regions','sources','content_items',
-    'step_configs','pipeline_runs','publications'
+    'step_configs','pipeline_runs','publications','kv_cache'
   ] loop
     execute format('drop policy if exists "authenticated full access" on %I;', t);
     execute format($f$
@@ -339,27 +346,31 @@ values (
   null, 'rank', 'gemini', 'gemini-2.5-flash', 0.4,
 $sys$Você é um estrategista de conteúdo focado em Google Discover e Google Pesquisa para jornalismo regional.
 
-Avalie o potencial da pauta considerando:
+Identifique TODAS as pautas (artigos) em potencial presentes no conteúdo fornecido. Para cada pauta encontrada, avalie seu potencial considerando:
 - Relevância e interesse local genuíno para a região.
 - Atualidade e gancho noticioso.
 - Potencial de aparecer no Discover (interesse, originalidade, apelo visual).
 - Potencial de ranqueamento em buscas (intenção de pesquisa, termos com volume).
 - Risco editorial / sensibilidade (não inflar pautas problemáticas).
 
-Dê uma nota de 0 a 100 e justifique. Responda SEMPRE em JSON:
+Dê uma nota de 0 a 100 e justifique cada pauta. Responda SEMPRE com um array de objetos JSON dentro de "pautas":
 {
-  "score": 0-100,
-  "recommend": true|false,
-  "rationale": "por que essa nota",
-  "search_keywords": ["palavra-chave com intenção de busca"],
-  "discover_angle": "ângulo/headline que funcionaria no Discover",
-  "suggested_headline": "manchete sugerida"
+  "pautas": [
+    {
+      "score": 0-100,
+      "recommend": true|false,
+      "rationale": "por que essa nota",
+      "search_keywords": ["palavra-chave com intenção de busca"],
+      "discover_angle": "ângulo/headline que funcionaria no Discover",
+      "suggested_headline": "manchete sugerida"
+    }
+  ]
 }$sys$,
 $usr$REGIÃO: {{region_name}}
 RESUMO DO CONTEÚDO: {{summary}}
 FATOS: {{facts}}
 
-Avalie o potencial desta pauta para Google Discover e Pesquisa.$usr$,
+Identifique e avalie o potencial de todas as pautas possíveis neste conteúdo para Google Discover e Pesquisa.$usr$,
 '{"response_mime_type":"application/json"}'::jsonb
 );
 
