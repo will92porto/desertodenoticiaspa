@@ -16,20 +16,48 @@ function adminClient() {
   return createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     { auth: { persistSession: false, autoRefreshToken: false } });
 }
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+// ---- OpenRouter (substitui Gemini antigo) ----
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
 async function callGemini(p: { model: string; systemPrompt: string; userPrompt: string; temperature?: number; maxOutputTokens?: number; responseMimeType?: string; }) {
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
-  const body = {
-    systemInstruction: { parts: [{ text: p.systemPrompt }] },
-    contents: [{ role: "user", parts: [{ text: p.userPrompt }] }],
-    generationConfig: { temperature: p.temperature ?? 0.7, maxOutputTokens: p.maxOutputTokens ?? 4096, ...(p.responseMimeType ? { responseMimeType: p.responseMimeType } : {}) },
+  const apiKey = Deno.env.get("OPEN_KEY");
+  if (!apiKey) throw new Error("OPEN_KEY não configurada.");
+  
+  const modelsToTry = [
+    "google/gemma-3-27b-it",
+    "google/gemini-2.5-flash-lite-preview"
+  ];
+  
+  const body: any = {
+    models: modelsToTry,
+    messages: [
+      { role: "system", content: p.systemPrompt },
+      { role: "user", content: p.userPrompt }
+    ],
+    temperature: p.temperature ?? 0.7,
+    max_tokens: p.maxOutputTokens ?? 4096,
   };
-  const res = await fetch(`${GEMINI_BASE}/${p.model}:generateContent?key=${apiKey}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+  
+  if (p.responseMimeType === "application/json") {
+    body.response_format = { type: "json_object" };
+  }
+  
+  const res = await fetch(OPENROUTER_BASE, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://desertodenoticias.com",
+      "X-Title": "Deserto de Noticias"
+    },
+    body: JSON.stringify(body)
+  });
+  
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`);
+  
   const j = await res.json();
-  const text: string = j?.candidates?.[0]?.content?.parts?.map((x: any) => x.text ?? "").join("") ?? "";
-  return { text, tokensInput: j?.usageMetadata?.promptTokenCount, tokensOutput: j?.usageMetadata?.candidatesTokenCount };
+  const text: string = j?.choices?.[0]?.message?.content ?? "";
+  
+  return { text, tokensInput: j?.usage?.prompt_tokens, tokensOutput: j?.usage?.completion_tokens };
 }
 async function resolveStepConfig(db: any, step: string, projectId: string) {
   const { data, error } = await db.from("step_configs").select("*").eq("step", step).eq("is_active", true).or(`project_id.eq.${projectId},project_id.is.null`);

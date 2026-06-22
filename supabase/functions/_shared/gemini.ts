@@ -1,14 +1,15 @@
-// Cliente mínimo da API Gemini (generateContent) via REST.
+// Cliente da API OpenRouter (substitui o antigo cliente Gemini direto).
 // Mantido simples e sem dependências para rodar em Deno/Edge Functions.
 
 export interface GeminiCallParams {
-  model: string;
+  model: string; // Mantido para compatibilidade, mas sobrescrito internamente pelo array de fallback
   systemPrompt: string;
   userPrompt: string;
   temperature?: number;
   maxOutputTokens?: number;
   // Quando "application/json", força saída JSON.
   responseMimeType?: string;
+  youtubeUrl?: string;
 }
 
 export interface GeminiResult {
@@ -18,42 +19,60 @@ export interface GeminiResult {
   raw: unknown;
 }
 
-const BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
 
 export async function callGemini(p: GeminiCallParams): Promise<GeminiResult> {
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
+  const apiKey = Deno.env.get("OPEN_KEY");
+  if (!apiKey) throw new Error("OPEN_KEY não configurada.");
 
-  const body: Record<string, unknown> = {
-    systemInstruction: { parts: [{ text: p.systemPrompt }] },
-    contents: [{ role: "user", parts: [{ text: p.userPrompt }] }],
-    generationConfig: {
-      temperature: p.temperature ?? 0.7,
-      maxOutputTokens: p.maxOutputTokens ?? 4096,
-      ...(p.responseMimeType ? { responseMimeType: p.responseMimeType } : {}),
-    },
+  // Fallback configurado conforme solicitado pelo usuário
+  const modelsToTry = [
+    "google/gemma-3-27b-it",
+    "google/gemini-2.5-flash-lite-preview"
+  ];
+
+  let finalUserPrompt = p.userPrompt;
+  if (p.youtubeUrl) {
+    finalUserPrompt += `\n\n[URL do Vídeo referenciado: ${p.youtubeUrl}]`;
+  }
+
+  const body: any = {
+    models: modelsToTry,
+    messages: [
+      { role: "system", content: p.systemPrompt },
+      { role: "user", content: finalUserPrompt }
+    ],
+    temperature: p.temperature ?? 0.7,
+    max_tokens: p.maxOutputTokens ?? 4096,
   };
 
-  const url = `${BASE}/${p.model}:generateContent?key=${apiKey}`;
-  const res = await fetch(url, {
+  if (p.responseMimeType === "application/json") {
+    body.response_format = { type: "json_object" };
+  }
+
+  const res = await fetch(OPENROUTER_BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { 
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://desertodenoticias.com",
+      "X-Title": "Deserto de Noticias"
+    },
     body: JSON.stringify(body),
   });
 
   if (!res.ok) {
     const errText = await res.text();
-    throw new Error(`Gemini ${res.status}: ${errText}`);
+    throw new Error(`OpenRouter ${res.status}: ${errText}`);
   }
 
   const json = await res.json();
-  const text: string =
-    json?.candidates?.[0]?.content?.parts?.map((x: { text?: string }) => x.text ?? "").join("") ?? "";
+  const text: string = json?.choices?.[0]?.message?.content ?? "";
 
   return {
     text,
-    tokensInput: json?.usageMetadata?.promptTokenCount,
-    tokensOutput: json?.usageMetadata?.candidatesTokenCount,
+    tokensInput: json?.usage?.prompt_tokens,
+    tokensOutput: json?.usage?.completion_tokens,
     raw: json,
   };
 }

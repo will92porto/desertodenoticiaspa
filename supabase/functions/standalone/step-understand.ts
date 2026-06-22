@@ -25,38 +25,57 @@ function adminClient() {
   );
 }
 
-// ---- Gemini ----
-const GEMINI_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+// ---- OpenRouter (substitui Gemini antigo) ----
+const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
 async function callGemini(p: {
   model: string; systemPrompt: string; userPrompt: string;
   temperature?: number; maxOutputTokens?: number; responseMimeType?: string;
-  // Quando presente, envia o vídeo do YouTube para o Gemini processar (transcrição
-  // real do áudio + leitura visual), sem precisar baixar o arquivo.
   youtubeUrl?: string;
 }) {
-  const apiKey = Deno.env.get("GEMINI_API_KEY");
-  if (!apiKey) throw new Error("GEMINI_API_KEY não configurada.");
-  const parts: any[] = [];
+  const apiKey = Deno.env.get("OPEN_KEY");
+  if (!apiKey) throw new Error("OPEN_KEY não configurada.");
+
+  const modelsToTry = [
+    "google/gemma-3-27b-it",
+    "google/gemini-2.5-flash-lite-preview"
+  ];
+
+  let finalUserPrompt = p.userPrompt;
   if (p.youtubeUrl) {
-    parts.push({ fileData: { fileUri: p.youtubeUrl } });
+    finalUserPrompt += `\n\n[URL do Vídeo referenciado: ${p.youtubeUrl}]`;
   }
-  parts.push({ text: p.userPrompt });
-  const body = {
-    systemInstruction: { parts: [{ text: p.systemPrompt }] },
-    contents: [{ role: "user", parts }],
-    generationConfig: {
-      temperature: p.temperature ?? 0.7,
-      maxOutputTokens: p.maxOutputTokens ?? 4096,
-      ...(p.responseMimeType ? { responseMimeType: p.responseMimeType } : {}),
-    },
+
+  const body: any = {
+    models: modelsToTry,
+    messages: [
+      { role: "system", content: p.systemPrompt },
+      { role: "user", content: finalUserPrompt }
+    ],
+    temperature: p.temperature ?? 0.7,
+    max_tokens: p.maxOutputTokens ?? 4096,
   };
-  const res = await fetch(`${GEMINI_BASE}/${p.model}:generateContent?key=${apiKey}`, {
-    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+
+  if (p.responseMimeType === "application/json") {
+    body.response_format = { type: "json_object" };
+  }
+
+  const res = await fetch(OPENROUTER_BASE, {
+    method: "POST", 
+    headers: { 
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://desertodenoticias.com",
+      "X-Title": "Deserto de Noticias"
+    }, 
+    body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`Gemini ${res.status}: ${await res.text()}`);
+  
+  if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${await res.text()}`);
+  
   const j = await res.json();
-  const text: string = j?.candidates?.[0]?.content?.parts?.map((x: any) => x.text ?? "").join("") ?? "";
-  return { text, tokensInput: j?.usageMetadata?.promptTokenCount, tokensOutput: j?.usageMetadata?.candidatesTokenCount };
+  const text: string = j?.choices?.[0]?.message?.content ?? "";
+  
+  return { text, tokensInput: j?.usage?.prompt_tokens, tokensOutput: j?.usage?.completion_tokens };
 }
 function parseJsonLoose<T = any>(text: string): T {
   let t = text.trim();
