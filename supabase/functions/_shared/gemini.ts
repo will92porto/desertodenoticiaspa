@@ -2,12 +2,12 @@
 // Mantido simples e sem dependências para rodar em Deno/Edge Functions.
 
 export interface GeminiCallParams {
-  model: string; // Mantido para compatibilidade, mas sobrescrito internamente pelo array de fallback
+  model?: string; // Mantido para compatibilidade, mas sobrescrito internamente pelo array de fallback
+  modelsToTry?: string[]; // Array dinâmico de modelos priorizados
   systemPrompt: string;
   userPrompt: string;
   temperature?: number;
   maxOutputTokens?: number;
-  // Quando "application/json", força saída JSON.
   responseMimeType?: string;
   youtubeUrl?: string;
 }
@@ -25,11 +25,13 @@ export async function callGemini(p: GeminiCallParams): Promise<GeminiResult> {
   const apiKey = Deno.env.get("OPEN_KEY");
   if (!apiKey) throw new Error("OPEN_KEY não configurada.");
 
-  // Fallback configurado conforme solicitado pelo usuário
-  const modelsToTry = [
-    "google/gemma-3-27b-it",
-    "google/gemini-2.5-flash-lite-preview"
-  ];
+  // Fallback configurado dinamicamente pelo banco ou padrão
+  const modelsToTry = p.modelsToTry && p.modelsToTry.length > 0
+    ? p.modelsToTry
+    : [
+        "google/gemma-3-27b-it",
+        "google/gemini-2.5-flash-lite"
+      ];
 
   let finalUserPrompt = p.userPrompt;
   if (p.youtubeUrl) {

@@ -50,9 +50,19 @@ export async function runStep(
     finalSystemPrompt += "\n\n=== DIRETRIZES DE TREINAMENTO DO NEGÓCIO ===\n" + trainingContent;
   }
 
+  // Busca a ordem de fallback de modelos dinamicamente
+  const { data: aiModelsData } = await db
+    .from("ai_models")
+    .select("model_id")
+    .eq("is_active", true)
+    .order("priority", { ascending: true });
+    
+  const modelsToTry = aiModelsData?.map((m) => m.model_id) || [];
+
   try {
     const res = await callGemini({
       model: config.model,
+      modelsToTry,
       systemPrompt: finalSystemPrompt,
       userPrompt,
       temperature: config.temperature,

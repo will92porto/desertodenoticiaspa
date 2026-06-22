@@ -18,14 +18,16 @@ function adminClient() {
 }
 // ---- OpenRouter (substitui Gemini antigo) ----
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
-async function callGemini(p: { model: string; systemPrompt: string; userPrompt: string; temperature?: number; maxOutputTokens?: number; responseMimeType?: string; }) {
+async function callGemini(p: { model?: string; modelsToTry?: string[]; systemPrompt: string; userPrompt: string; temperature?: number; maxOutputTokens?: number; responseMimeType?: string; }) {
   const apiKey = Deno.env.get("OPEN_KEY");
   if (!apiKey) throw new Error("OPEN_KEY não configurada.");
   
-  const modelsToTry = [
-    "google/gemma-3-27b-it",
-    "google/gemini-2.5-flash-lite-preview"
-  ];
+  const modelsToTry = p.modelsToTry && p.modelsToTry.length > 0
+    ? p.modelsToTry
+    : [
+        "google/gemma-3-27b-it",
+        "google/gemini-2.5-flash-lite"
+      ];
   
   const body: any = {
     models: modelsToTry,
@@ -88,8 +90,13 @@ async function runStep(db: any, step: string, item: any, vars: Record<string, un
   const responseMimeType = config.extra?.response_mime_type || undefined;
   const start = Date.now();
   let outputText = "", runStatus = "ok", errorMessage: string | null = null, tokensIn, tokensOut;
+
+  // Busca a ordem de fallback de modelos dinamicamente
+  const { data: aiModelsData } = await db.from("ai_models").select("model_id").eq("is_active", true).order("priority", { ascending: true });
+  const modelsToTry = aiModelsData?.map((m: any) => m.model_id) || [];
+
   try {
-    const res = await callGemini({ model: config.model, systemPrompt, userPrompt, temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType });
+    const res = await callGemini({ model: config.model, modelsToTry, systemPrompt, userPrompt, temperature: config.temperature, maxOutputTokens: config.max_output_tokens, responseMimeType });
     outputText = res.text; tokensIn = res.tokensInput; tokensOut = res.tokensOutput;
   } catch (e) { runStatus = "error"; errorMessage = e instanceof Error ? e.message : String(e); }
   await db.from("pipeline_runs").insert({ content_item_id: item.id, step, step_config_id: config.id, provider: config.provider, model: config.model, prompt_sent: userPrompt, output_raw: outputText, tokens_input: tokensIn ?? null, tokens_output: tokensOut ?? null, duration_ms: Date.now() - start, status: runStatus, error_message: errorMessage });

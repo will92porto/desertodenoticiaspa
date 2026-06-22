@@ -13,6 +13,7 @@ const nav = [
   { href: "/pipeline", label: "Pipeline" },
   { href: "/resultados", label: "Resultados" },
   { href: "/settings/steps", label: "Etapas & Prompts" },
+  { href: "/settings/models", label: "Modelos de IA" },
 ];
 
 export default function RootLayout({ children }: { children: ReactNode }) {

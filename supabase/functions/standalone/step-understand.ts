@@ -28,17 +28,19 @@ function adminClient() {
 // ---- OpenRouter (substitui Gemini antigo) ----
 const OPENROUTER_BASE = "https://openrouter.ai/api/v1/chat/completions";
 async function callGemini(p: {
-  model: string; systemPrompt: string; userPrompt: string;
+  model?: string; modelsToTry?: string[]; systemPrompt: string; userPrompt: string;
   temperature?: number; maxOutputTokens?: number; responseMimeType?: string;
   youtubeUrl?: string;
 }) {
   const apiKey = Deno.env.get("OPEN_KEY");
   if (!apiKey) throw new Error("OPEN_KEY não configurada.");
 
-  const modelsToTry = [
-    "google/gemma-3-27b-it",
-    "google/gemini-2.5-flash-lite-preview"
-  ];
+  const modelsToTry = p.modelsToTry && p.modelsToTry.length > 0
+    ? p.modelsToTry
+    : [
+        "google/gemma-3-27b-it",
+        "google/gemini-2.5-flash-lite"
+      ];
 
   let finalUserPrompt = p.userPrompt;
   if (p.youtubeUrl) {
@@ -117,9 +119,20 @@ async function runStep(db: any, step: string, item: any, vars: Record<string, un
   const start = Date.now();
   let outputText = "", runStatus = "ok", errorMessage: string | null = null;
   let tokensIn, tokensOut;
+
+  // Busca a ordem de fallback de modelos dinamicamente
+  const { data: aiModelsData } = await db
+    .from("ai_models")
+    .select("model_id")
+    .eq("is_active", true)
+    .order("priority", { ascending: true });
+  const modelsToTry = aiModelsData?.map((m: any) => m.model_id) || [];
+
   try {
     const res = await callGemini({
-      model: config.model, systemPrompt, userPrompt,
+      model: config.model,
+      modelsToTry,
+      systemPrompt, userPrompt,
       temperature: config.temperature,
       // Transcrição de vídeo pode ser longa: garante teto alto quando há vídeo.
       maxOutputTokens: youtubeUrl ? Math.max(config.max_output_tokens, 8192) : config.max_output_tokens,
