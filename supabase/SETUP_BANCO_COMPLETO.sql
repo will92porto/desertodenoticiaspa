@@ -189,6 +189,21 @@ create table if not exists step_configs (
 create index on step_configs (step, is_active);
 
 -- -----------------------------------------------------------------------------
+-- TREINAMENTO DO NEGÓCIO (Guias de Jornalismo / Treinador de Notícias)
+-- -----------------------------------------------------------------------------
+-- Regras gerais de jornalismo que são injetadas em todas as etapas de IA.
+-- project_id null = default global.
+
+create table if not exists business_training (
+  id            uuid primary key default gen_random_uuid(),
+  project_id    uuid references projects(id) on delete cascade,
+  content       text not null default '',
+  updated_at    timestamptz not null default now(),
+  created_at    timestamptz not null default now(),
+  unique (project_id)
+);
+
+-- -----------------------------------------------------------------------------
 -- LOG DE EXECUÇÕES DO PIPELINE (auditoria + debug de prompts)
 -- -----------------------------------------------------------------------------
 
@@ -256,6 +271,8 @@ drop trigger if exists trg_content_updated on content_items;
 create trigger trg_content_updated before update on content_items for each row execute function set_updated_at();
 drop trigger if exists trg_stepcfg_updated on step_configs;
 create trigger trg_stepcfg_updated before update on step_configs for each row execute function set_updated_at();
+drop trigger if exists trg_businesstr_updated on business_training;
+create trigger trg_businesstr_updated before update on business_training for each row execute function set_updated_at();
 
 -- =============================================================================
 -- Row Level Security
@@ -272,6 +289,7 @@ alter table regions        enable row level security;
 alter table sources        enable row level security;
 alter table content_items  enable row level security;
 alter table step_configs   enable row level security;
+alter table business_training enable row level security;
 alter table pipeline_runs  enable row level security;
 alter table publications   enable row level security;
 alter table kv_cache       enable row level security;
@@ -284,7 +302,7 @@ declare t text;
 begin
   foreach t in array array[
     'projects','regions','sources','content_items',
-    'step_configs','pipeline_runs','publications','kv_cache'
+    'step_configs','business_training','pipeline_runs','publications','kv_cache'
   ] loop
     execute format('drop policy if exists "authenticated full access" on %I;', t);
     execute format($f$
@@ -307,6 +325,36 @@ end $$;
 
 -- Limpa defaults globais antes de reinserir (idempotente).
 delete from step_configs where project_id is null;
+delete from business_training where project_id is null;
+
+-- ---- TREINAMENTO DO NEGÓCIO -------------------------------------------------
+insert into business_training (project_id, content) values (
+  null,
+$md$# O que é uma boa notícia no jornalismo local
+Uma boa notícia inspira, educa e fortalece o sentimento de pertencimento da comunidade. Toda informação verídica e útil é uma boa notícia, mas ela ganha força quando:
+- **Foco em Soluções:** Mostra como um problema local foi resolvido ou ações de moradores, em vez de focar apenas no conflito.
+- **Utilidade Pública:** Traz serviços, vagas, mudanças no trânsito ou infraestrutura.
+- **Histórias e Talentos:** Valoriza figuras inspiradoras da região.
+
+# Como fazer jornalismo local
+- **Proximidade:** Cubra o que afeta o dia a dia das pessoas. O buraco na rua importa mais que a crise internacional.
+- **Independência:** Não seja refém de releases oficiais ou assessorias. Vá além e busque a visão da população.
+- **Empatia e Verificação:** Não publique boatos de redes sociais sem checar. A credibilidade é o seu maior ativo na região.
+
+# Cuidados na Produção do Texto
+- **Pirâmide Invertida:** Vá direto ao ponto. O primeiro parágrafo (Lide) deve responder: O que, Quem, Quando, Onde e Como.
+- **Clareza e Concisão:** Escreva frases curtas. Use a ordem direta (Sujeito + Verbo + Predicado). Sem enrolação.
+- **Linguagem Objetiva:** Evite adjetivos emocionais, julgamentos, gírias e a primeira pessoa (eu/nós). Mantenha o tom denotativo.
+
+# Exemplos do que FAZER
+- **FAZER:** "Aulas na escola X são suspensas após enchente" (Claro, direto e útil).
+- **FAZER:** Checar datas, nomes, cargos e números antes de avançar qualquer texto.
+
+# Exemplos do que NÃO FAZER
+- **NÃO FAZER:** Transformar a notícia em opinião disfarçada ou ataque sem provas.
+- **NÃO FAZER:** Títulos confusos ("Aconteceu um negócio na prefeitura" em vez de "Prefeitura suspende licitação").
+- **NÃO FAZER:** Escrever parágrafos com mais de 6 linhas ou abusar de palavras difíceis (rebuscamento).$md$
+);
 
 -- ---- ETAPA 1: ENTENDIMENTO / TRANSCRIÇÃO ------------------------------------
 insert into step_configs (project_id, step, provider, model, temperature, system_prompt, user_prompt_template, extra)

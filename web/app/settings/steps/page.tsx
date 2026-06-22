@@ -23,11 +23,30 @@ async function saveConfig(formData: FormData) {
   revalidatePath("/settings/steps");
 }
 
+async function saveTraining(formData: FormData) {
+  "use server";
+  const db = supabaseAdmin();
+  const content = String(formData.get("content"));
+  const id = formData.get("id");
+
+  if (id) {
+    await db.from("business_training").update({ content }).eq("id", String(id));
+  } else {
+    // Se não existia o default global, cria
+    await db.from("business_training").insert({ project_id: null, content });
+  }
+  revalidatePath("/settings/steps");
+}
+
 export default async function StepsSettings() {
   const db = supabaseAdmin();
   // Mostra os defaults globais (project_id null), na ordem das etapas.
   const { data: configs } = await db
     .from("step_configs").select("*").is("project_id", null);
+
+  const { data: trainingList } = await db
+    .from("business_training").select("*").is("project_id", null);
+  const training = trainingList?.[0];
 
   const order = ["understand", "rank", "write", "polish"];
   const sorted = (configs ?? []).sort(
@@ -41,6 +60,24 @@ export default async function StepsSettings() {
         Configuração padrão (global) de cada etapa. Cada projeto pode sobrescrever depois.
         Placeholders no template do usuário, ex.: <code>{"{{summary}}"}</code>, <code>{"{{transcript}}"}</code>.
       </p>
+
+      <form action={saveTraining} className="card" style={{ borderLeft: "4px solid var(--accent)", marginBottom: "2rem" }}>
+        {training?.id && <input type="hidden" name="id" value={training.id} />}
+        <h3>Treinador de Notícias (Treinamento do Negócio)</h3>
+        <p className="muted" style={{ fontSize: "0.9rem", marginTop: 0 }}>
+          Estas regras são injetadas automaticamente no <b>final do System Prompt de todas as etapas</b> do pipeline. 
+          Use para definir tom, regras éticas e o que o sistema deve ou não fazer (jornalismo local).
+        </p>
+        <label className="field">
+          <textarea 
+            name="content" 
+            defaultValue={training?.content ?? ""} 
+            style={{ minHeight: 250, fontFamily: "monospace" }} 
+            placeholder="# O que é uma boa notícia..."
+          />
+        </label>
+        <button className="btn" type="submit">Salvar Treinamento</button>
+      </form>
 
       {sorted.map((c: any) => (
         <form action={saveConfig} className="card" key={c.id}>

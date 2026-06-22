@@ -32,10 +32,28 @@ export async function runStep(
   let tokensIn: number | undefined;
   let tokensOut: number | undefined;
 
+  // Busca o Treinamento do Negócio (se houver)
+  const { data: trainingData } = await db
+    .from("business_training")
+    .select("*")
+    .or(`project_id.eq.${item.project_id},project_id.is.null`);
+
+  let trainingContent = "";
+  if (trainingData && trainingData.length > 0) {
+    // Prioriza o do projeto, se não, pega o global
+    const specific = trainingData.find((t) => t.project_id === item.project_id);
+    trainingContent = specific ? specific.content : trainingData[0].content;
+  }
+
+  let finalSystemPrompt = config.system_prompt;
+  if (trainingContent) {
+    finalSystemPrompt += "\n\n=== DIRETRIZES DE TREINAMENTO DO NEGÓCIO ===\n" + trainingContent;
+  }
+
   try {
     const res = await callGemini({
       model: config.model,
-      systemPrompt: config.system_prompt,
+      systemPrompt: finalSystemPrompt,
       userPrompt,
       temperature: config.temperature,
       maxOutputTokens: config.max_output_tokens,

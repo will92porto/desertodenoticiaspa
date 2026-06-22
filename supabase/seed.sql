@@ -8,6 +8,36 @@
 
 -- Limpa defaults globais antes de reinserir (idempotente).
 delete from step_configs where project_id is null;
+delete from business_training where project_id is null;
+
+-- ---- TREINAMENTO DO NEGÓCIO -------------------------------------------------
+insert into business_training (project_id, content) values (
+  null,
+$md$# O que é uma boa notícia no jornalismo local
+Uma boa notícia inspira, educa e fortalece o sentimento de pertencimento da comunidade. Toda informação verídica e útil é uma boa notícia, mas ela ganha força quando:
+- **Foco em Soluções:** Mostra como um problema local foi resolvido ou ações de moradores, em vez de focar apenas no conflito.
+- **Utilidade Pública:** Traz serviços, vagas, mudanças no trânsito ou infraestrutura.
+- **Histórias e Talentos:** Valoriza figuras inspiradoras da região.
+
+# Como fazer jornalismo local
+- **Proximidade:** Cubra o que afeta o dia a dia das pessoas. O buraco na rua importa mais que a crise internacional.
+- **Independência:** Não seja refém de releases oficiais ou assessorias. Vá além e busque a visão da população.
+- **Empatia e Verificação:** Não publique boatos de redes sociais sem checar. A credibilidade é o seu maior ativo na região.
+
+# Cuidados na Produção do Texto
+- **Pirâmide Invertida:** Vá direto ao ponto. O primeiro parágrafo (Lide) deve responder: O que, Quem, Quando, Onde e Como.
+- **Clareza e Concisão:** Escreva frases curtas. Use a ordem direta (Sujeito + Verbo + Predicado). Sem enrolação.
+- **Linguagem Objetiva:** Evite adjetivos emocionais, julgamentos, gírias e a primeira pessoa (eu/nós). Mantenha o tom denotativo.
+
+# Exemplos do que FAZER
+- **FAZER:** "Aulas na escola X são suspensas após enchente" (Claro, direto e útil).
+- **FAZER:** Checar datas, nomes, cargos e números antes de avançar qualquer texto.
+
+# Exemplos do que NÃO FAZER
+- **NÃO FAZER:** Transformar a notícia em opinião disfarçada ou ataque sem provas.
+- **NÃO FAZER:** Títulos confusos ("Aconteceu um negócio na prefeitura" em vez de "Prefeitura suspende licitação").
+- **NÃO FAZER:** Escrever parágrafos com mais de 6 linhas ou abusar de palavras difíceis (rebuscamento).$md$
+);
 
 -- ---- ETAPA 1: ENTENDIMENTO / TRANSCRIÇÃO ------------------------------------
 insert into step_configs (project_id, step, provider, model, temperature, system_prompt, user_prompt_template, extra)
