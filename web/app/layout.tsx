@@ -11,6 +11,7 @@ const nav = [
   { href: "/", label: "Visão geral" },
   { href: "/projects", label: "Projetos" },
   { href: "/pipeline", label: "Pipeline" },
+  { href: "/resultados", label: "Resultados" },
   { href: "/settings/steps", label: "Etapas & Prompts" },
 ];
 
