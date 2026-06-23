@@ -10,7 +10,7 @@ export default async function ResultadosPage() {
     .select("id, title, final_article, status, regions(name)")
     .in("status", ["ready", "publishing", "published"])
     .order("updated_at", { ascending: false })
-    .limit(10);
+    .limit(100);
 
   return (
     <div>
