@@ -55,29 +55,38 @@ export default async function PipelinePage(
   let query = db
     .from("content_items")
     .select("id, title, status, rank_score, created_at, region_id, regions(name), sources(name)")
-    .limit(100);
-
-  // Tratamento especial para ordenar por fonte (que é uma tabela relacionada)
-  // Como o Supabase não suporta order by em foreign tables nativamente com JS simples sem view,
-  // se for 'source', ordenamos em JS ou criamos um workaround. Para manter simples, 
-  // permitimos ordenação nativa nas colunas locais.
-  if (sortCol === "source") {
-    // Se quiser ordenar por fonte, pegamos tudo (limite 100) e ordenamos no JS abaixo.
-    query = query.order("created_at", { ascending: false });
-  } else {
-    query = query.order(sortCol, { ascending: sortOrder });
-  }
+    .order("created_at", { ascending: false })
+    .limit(300);
 
   const { data: rawItems } = await query;
   let items = rawItems ?? [];
 
-  if (sortCol === "source") {
-    items.sort((a: any, b: any) => {
-      const s1 = a.sources?.name || "";
-      const s2 = b.sources?.name || "";
-      return sortOrder ? s1.localeCompare(s2) : s2.localeCompare(s1);
-    });
-  }
+  // Ordenação feita em JS para garantir que os itens exibidos (os 300 mais recentes) 
+  // sejam sempre os mesmos, independentemente da coluna clicada (evitando que sumam pelo limit do banco).
+  items.sort((a: any, b: any) => {
+    let valA = a[sortCol];
+    let valB = b[sortCol];
+
+    if (sortCol === "source") {
+      valA = a.sources?.name || "";
+      valB = b.sources?.name || "";
+    } else if (sortCol === "title" || sortCol === "status") {
+      valA = valA || "";
+      valB = valB || "";
+    } else if (sortCol === "rank_score") {
+      valA = valA ?? 0;
+      valB = valB ?? 0;
+    } else if (sortCol === "created_at") {
+      valA = new Date(valA || 0).getTime();
+      valB = new Date(valB || 0).getTime();
+    }
+
+    if (typeof valA === "string" && typeof valB === "string") {
+      return sortOrder ? valA.localeCompare(valB) : valB.localeCompare(valA);
+    } else {
+      return sortOrder ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+    }
+  });
 
   return (
     <div>
