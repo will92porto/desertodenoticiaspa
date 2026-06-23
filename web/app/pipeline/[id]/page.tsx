@@ -27,6 +27,33 @@ async function runOneStep(formData: FormData) {
   redirect(`/pipeline/${id}?msg=${encodeURIComponent(msg.slice(0, 500))}`);
 }
 
+async function runAllSteps(formData: FormData) {
+  "use server";
+  const id = String(formData.get("id"));
+  let msg = "Processamento em lote finalizado com sucesso!";
+  try {
+    const r1 = await invokeFunction("step-understand", { content_item_id: id });
+    if (r1.error) throw new Error(r1.error);
+
+    const r2 = await invokeFunction("step-rank", { content_item_id: id });
+    if (r2.error) throw new Error(r2.error);
+
+    if (r2.status === "discarded") {
+      msg = "Processo abortado: A matéria foi DESCARTADA pelo robô de Ranking por ter relevância baixa.";
+    } else {
+      const r3 = await invokeFunction("step-write", { content_item_id: id });
+      if (r3.error) throw new Error(r3.error);
+
+      const r4 = await invokeFunction("step-polish", { content_item_id: id });
+      if (r4.error) throw new Error(r4.error);
+    }
+  } catch (e) {
+    msg = `ERRO na execução em lote: ${e instanceof Error ? e.message : String(e)}`;
+  }
+  revalidatePath(`/pipeline/${id}`);
+  redirect(`/pipeline/${id}?msg=${encodeURIComponent(msg.slice(0, 500))}`);
+}
+
 export default async function ItemDetail(
   { params, searchParams }: { params: { id: string }; searchParams: { msg?: string } },
 ) {
@@ -55,14 +82,20 @@ export default async function ItemDetail(
       <div className="card">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h3 style={{ margin: 0 }}>Acionar etapas manualmente</h3>
-          <form action={async () => {
-            "use server";
-            const db = supabaseAdmin();
-            await db.from("content_items").delete().eq("id", item.id);
-            redirect("/pipeline");
-          }}>
-            <button className="btn" style={{ background: "var(--red)", borderColor: "var(--red)" }}>Excluir Pauta</button>
-          </form>
+          <div className="row" style={{ gap: 8 }}>
+            <form action={runAllSteps}>
+              <input type="hidden" name="id" value={item.id} />
+              <button className="btn" style={{ background: "var(--accent)", color: "#000", borderColor: "var(--accent)" }}>Executar Todas de uma vez</button>
+            </form>
+            <form action={async () => {
+              "use server";
+              const db = supabaseAdmin();
+              await db.from("content_items").delete().eq("id", item.id);
+              redirect("/pipeline");
+            }}>
+              <button className="btn" style={{ background: "var(--red)", borderColor: "var(--red)" }}>Excluir Pauta</button>
+            </form>
+          </div>
         </div>
         <div className="row">
           {(["understand", "rank", "write", "polish"] as const).map((s) => (
