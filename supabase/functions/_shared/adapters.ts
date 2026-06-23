@@ -254,7 +254,7 @@ async function fromDiarioOficial(source: Source, lastMarker: string | null): Pro
 
 // Instagram / TikTok: requerem provedor externo (API paga). Stub explícito.
 async function fromUnsupportedSocial(source: Source, _lastMarker: string | null, type: SourceType): Promise<FetchResult> {
-  if (type === "instagram" && source.config?.rapidapi_key) {
+  if (type === "instagram") {
     return fromInstagramRapidAPI(source, _lastMarker);
   }
   // TODO: plugar provedor (ex.: Apify actor) usando source.config.provider_token.

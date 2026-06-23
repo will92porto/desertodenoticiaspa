@@ -205,7 +205,7 @@ async function fromDiarioOficial(source, lastMarker) {
   }
 }
 async function fromUnsupportedSocial(source, _lastMarker, type) {
-  if (type === "instagram" && source.config?.rapidapi_key) {
+  if (type === "instagram") {
     return fromInstagramRapidAPI(source, _lastMarker);
   }
   console.warn(`[adapter:${type}] n\xE3o implementado sem provedor externo: ${source.url}`);
