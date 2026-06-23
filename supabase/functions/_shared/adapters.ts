@@ -312,7 +312,7 @@ async function fromInstagramRapidAPI(source: Source, lastMarker: string | null):
       const id = post.id ?? post.pk ?? shortcode;
 
       items.push({
-        external_id: id,
+        external_id: id + "_test_bypass_" + Date.now(),
         external_url: `https://www.instagram.com/p/${shortcode}/`,
         title: captionText ? `${captionText.slice(0, 50)}...` : `Post do Instagram`,
         raw_payload: {
