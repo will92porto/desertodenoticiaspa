@@ -24,7 +24,7 @@ Deno.serve(async (req) => {
       // Respeita o intervalo de verificação.
       if (s.last_checked_at) {
         const due = new Date(s.last_checked_at).getTime() + s.check_interval_minutes * 60_000;
-        if (now < due) continue;
+        // if (now < due) continue; // Bypass TEMPORARY
       }
 
       // Precisamos do region_id e project_id para criar os itens.

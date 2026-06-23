@@ -358,7 +358,6 @@ Deno.serve(async (req) => {
     for (const s of sources ?? []) {
       if (s.last_checked_at) {
         const due = new Date(s.last_checked_at).getTime() + s.check_interval_minutes * 6e4;
-        if (now < due) continue;
       }
       const { data: region } = await db.from("regions").select("id, project_id").eq("id", s.region_id).single();
       if (!region) continue;
