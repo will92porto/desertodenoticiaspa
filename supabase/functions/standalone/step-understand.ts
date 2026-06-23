@@ -225,7 +225,8 @@ Deno.serve(async (req) => {
     }
     let nativeTranscript = null;
     const sourceType = source?.type ?? "";
-    if (sourceType === "youtube" && item.external_url) {
+    const isYoutubeUrl = item.external_url && (item.external_url.includes("youtube.com") || item.external_url.includes("youtu.be"));
+    if ((sourceType === "youtube" || isYoutubeUrl) && item.external_url) {
       const match = item.external_url.match(/(?:v=|youtu\.be\/)([^&]+)/);
       if (match && match[1]) {
         const videoId = match[1];

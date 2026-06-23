@@ -90,6 +90,9 @@ export default async function ItemDetail(
             <form action={async () => {
               "use server";
               const db = supabaseAdmin();
+              // Remove logs primeiro para evitar erro de Foreign Key
+              await db.from("pipeline_runs").delete().eq("content_item_id", item.id);
+              // Depois remove o item
               await db.from("content_items").delete().eq("id", item.id);
               redirect("/pipeline");
             }}>
