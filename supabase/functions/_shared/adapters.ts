@@ -10,8 +10,8 @@
 // O contrato é estável; trocar a implementação interna depois não muda o cron.
 
 import type { Source, SourceType } from "./types.ts";
-import pdf from "npm:pdf-parse";
-import { Buffer } from "node:buffer";
+// Dependências pesadas ou de Node.js foram movidas para importação dinâmica
+// para evitar BOOT_ERROR no Supabase Edge Runtime.
 
 export interface NewItem {
   external_id: string;        // identidade única dentro da fonte
@@ -229,7 +229,10 @@ async function fromDiarioOficial(source: Source, lastMarker: string | null): Pro
     if (!res.ok) throw new Error(`Falha ao baixar PDF: ${res.status}`);
     const ab = await res.arrayBuffer();
     
-    // Extrai texto com pdf-parse
+    // Importação dinâmica para evitar BOOT_ERROR no painel do Supabase
+    const { default: pdf } = await import("npm:pdf-parse");
+    const { Buffer } = await import("node:buffer");
+
     const data = await pdf(Buffer.from(ab));
     const extractedText = data.text || "";
 

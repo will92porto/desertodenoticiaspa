@@ -45,14 +45,39 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default async function PipelinePage(
-  { searchParams }: { searchParams: { msg?: string } },
+  { searchParams }: { searchParams: { msg?: string; sort?: string; order?: string } },
 ) {
   const db = supabaseAdmin();
-  const { data: items } = await db
+  
+  const sortCol = searchParams?.sort || "created_at";
+  const sortOrder = searchParams?.order === "asc" ? true : false;
+
+  let query = db
     .from("content_items")
-    .select("id, title, status, rank_score, region_id, regions(name)")
-    .order("updated_at", { ascending: false })
-    .limit(50);
+    .select("id, title, status, rank_score, created_at, region_id, regions(name), sources(name)")
+    .limit(100);
+
+  // Tratamento especial para ordenar por fonte (que é uma tabela relacionada)
+  // Como o Supabase não suporta order by em foreign tables nativamente com JS simples sem view,
+  // se for 'source', ordenamos em JS ou criamos um workaround. Para manter simples, 
+  // permitimos ordenação nativa nas colunas locais.
+  if (sortCol === "source") {
+    // Se quiser ordenar por fonte, pegamos tudo (limite 100) e ordenamos no JS abaixo.
+    query = query.order("created_at", { ascending: false });
+  } else {
+    query = query.order(sortCol, { ascending: sortOrder });
+  }
+
+  const { data: rawItems } = await query;
+  let items = rawItems ?? [];
+
+  if (sortCol === "source") {
+    items.sort((a, b) => {
+      const s1 = a.sources?.name || "";
+      const s2 = b.sources?.name || "";
+      return sortOrder ? s1.localeCompare(s2) : s2.localeCompare(s1);
+    });
+  }
 
   return (
     <div>
@@ -72,12 +97,24 @@ export default async function PipelinePage(
       <div className="card">
         <table>
           <thead>
-            <tr><th>Título</th><th>Região</th><th>Status</th><th>Nota</th><th></th></tr>
+            <tr>
+              <th><a href="?sort=title&order=asc" className="muted">Título</a></th>
+              <th><a href="?sort=source&order=asc" className="muted">Fonte</a></th>
+              <th><a href="?sort=created_at&order=desc" className="muted">Criado em</a></th>
+              <th>Região</th>
+              <th><a href="?sort=status&order=asc" className="muted">Status</a></th>
+              <th><a href="?sort=rank_score&order=desc" className="muted">Nota</a></th>
+              <th></th>
+            </tr>
           </thead>
           <tbody>
             {(items ?? []).map((it: any) => (
               <tr key={it.id}>
                 <td><a href={`/pipeline/${it.id}`}>{it.title || "(sem título)"}</a></td>
+                <td className="muted">{it.sources?.name ?? "—"}</td>
+                <td className="muted" style={{ fontSize: "0.85rem" }}>
+                  {it.created_at ? new Date(it.created_at).toLocaleString("pt-BR") : "—"}
+                </td>
                 <td className="muted">{it.regions?.name ?? "—"}</td>
                 <td><span className="badge">{STATUS_LABEL[it.status] ?? it.status}</span></td>
                 <td>{it.rank_score ?? "—"}</td>
@@ -92,7 +129,7 @@ export default async function PipelinePage(
               </tr>
             ))}
             {(!items || items.length === 0) && (
-              <tr><td colSpan={5} className="muted">Nenhum item no pipeline ainda.</td></tr>
+              <tr><td colSpan={7} className="muted">Nenhum item no pipeline ainda.</td></tr>
             )}
           </tbody>
         </table>
