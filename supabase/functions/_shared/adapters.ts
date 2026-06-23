@@ -292,13 +292,13 @@ async function fromInstagramRapidAPI(source: Source, lastMarker: string | null):
     const posts = data?.posts ?? [];
     if (posts.length === 0) return { items: [], newMarker: lastMarker };
     
-    // O ID pode estar em post.node.id ou post.node.pk
     const newMarker = posts[0].node?.id ?? posts[0].node?.pk ?? lastMarker;
     let fresh = posts;
-    if (lastMarker) {
-      const idx = posts.findIndex((p: any) => (p.node?.id === lastMarker || p.node?.pk === lastMarker));
-      fresh = idx === -1 ? posts : posts.slice(0, idx);
-    }
+    // BYPASS TEMPORÁRIO para captar tudo de novo:
+    // if (lastMarker) {
+    //   const idx = posts.findIndex((p: any) => (p.node?.id === lastMarker || p.node?.pk === lastMarker));
+    //   fresh = idx === -1 ? posts : posts.slice(0, idx);
+    // }
 
     const items: NewItem[] = [];
     for (const postWrapper of fresh) {

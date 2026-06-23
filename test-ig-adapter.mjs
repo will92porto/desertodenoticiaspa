@@ -4,7 +4,7 @@ async function fromInstagramRapidAPI(url) {
   
   const formData = new URLSearchParams();
   formData.append("username_or_url", url);
-  formData.append("amount", "12");
+  formData.append("amount", "5");
 
   try {
     const res = await fetch(apiUrl, {
@@ -17,21 +17,26 @@ async function fromInstagramRapidAPI(url) {
       body: formData.toString()
     });
 
-    if (!res.ok) {
-       console.error(`Erro na API: ${res.status}`);
-       console.error(await res.text());
-       return;
+    const data = await res.json();
+    const posts = data?.posts ?? [];
+    if (posts.length === 0) return;
+    
+    const items = [];
+    for (const postWrapper of posts) {
+      const post = postWrapper.node ?? postWrapper;
+      const captionObj = post.caption ?? {};
+      const baseCaption = captionObj.text ?? post.caption ?? "";
+      const accessibilityCaption = post.accessibility_caption ?? "";
+      const captionText = [baseCaption, accessibilityCaption].filter(Boolean).join("\n\n");
+
+      items.push({
+        shortcode: post.code ?? post.shortcode,
+        captionText: captionText
+      });
     }
 
-    const data = await res.json();
-    console.log("Raw Response Data:", JSON.stringify(data).slice(0, 300));
-    const posts = data?.posts ?? [];
-    if (posts.length === 0) {
-        console.log("Nenhum post encontrado. Posts field might be empty.");
-        return;
-    }
-    
-    console.log("Sucesso! Posts captados:", posts.length);
+    console.log(JSON.stringify(items, null, 2));
+
   } catch (e) {
     console.error(`Erro na request RapidAPI:`, e);
   }

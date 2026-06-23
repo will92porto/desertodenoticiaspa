@@ -236,10 +236,6 @@ async function fromInstagramRapidAPI(source, lastMarker) {
     if (posts.length === 0) return { items: [], newMarker: lastMarker };
     const newMarker = posts[0].node?.id ?? posts[0].node?.pk ?? lastMarker;
     let fresh = posts;
-    if (lastMarker) {
-      const idx = posts.findIndex((p) => p.node?.id === lastMarker || p.node?.pk === lastMarker);
-      fresh = idx === -1 ? posts : posts.slice(0, idx);
-    }
     const items = [];
     for (const postWrapper of fresh) {
       const post = postWrapper.node ?? postWrapper;
