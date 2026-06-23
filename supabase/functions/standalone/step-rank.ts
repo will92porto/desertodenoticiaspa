@@ -198,7 +198,10 @@ Deno.serve(async (req) => {
       return p.recommend !== false && s >= MIN_SCORE;
     });
     if (validPautas.length === 0) {
+      const firstDiscarded = pautasList[0] ?? {};
       await db.from("content_items").update({
+        rank_score: Number(firstDiscarded.score ?? 0),
+        rank_rationale: firstDiscarded,
         status: "discarded"
       }).eq("id", content_item_id);
       return json({ ok: true, status: "discarded", count: 0 });

@@ -131,7 +131,7 @@ async function fromDiarioMunicipal(source, lastMarker) {
       }
     });
     const searchHtml = await searchRes.text();
-    const regex = /href=["']([^"']+\/materia\/[a-zA-Z0-9]+)["']/ig;
+    const regex = /href=["']([^"']+\/(?:materia|load)\/[a-zA-Z0-9]+)["']/ig;
     const links = /* @__PURE__ */ new Set();
     let match;
     while ((match = regex.exec(searchHtml)) !== null) {

@@ -37,6 +37,13 @@ async function addSource(formData: FormData) {
   revalidatePath(`/projects/${pid}`);
 }
 
+async function deleteSource(formData: FormData) {
+  "use server";
+  const db = supabaseAdmin();
+  await db.from("sources").delete().eq("id", String(formData.get("source_id")));
+  revalidatePath(`/projects/${String(formData.get("project_id"))}`);
+}
+
 export default async function ProjectDetail(
   { params, searchParams }: { params: { id: string }; searchParams: { erro?: string } },
 ) {
@@ -72,7 +79,7 @@ export default async function ProjectDetail(
           <h3>{r.name} <span className="badge">{r.state || "—"}</span></h3>
 
           <table>
-            <thead><tr><th>Fonte</th><th>Tipo</th><th>URL</th><th>Intervalo</th></tr></thead>
+            <thead><tr><th>Fonte</th><th>Tipo</th><th>URL</th><th>Intervalo</th><th style={{ width: 150 }}>Ações</th></tr></thead>
             <tbody>
               {(r.sources ?? []).map((s: any) => (
                 <tr key={s.id}>
@@ -80,10 +87,20 @@ export default async function ProjectDetail(
                   <td><span className="badge">{s.type}</span></td>
                   <td className="muted" style={{ maxWidth: 320, overflow: "hidden", textOverflow: "ellipsis" }}>{s.url}</td>
                   <td>{s.check_interval_minutes} min</td>
+                  <td>
+                    <div className="row" style={{ gap: 8, justifyContent: "flex-end" }}>
+                      <a href={`/projects/${project.id}/source/${s.id}`} className="btn secondary" style={{ padding: "4px 8px", fontSize: 12, height: "auto" }}>Editar</a>
+                      <form action={deleteSource}>
+                        <input type="hidden" name="project_id" value={project.id} />
+                        <input type="hidden" name="source_id" value={s.id} />
+                        <button className="btn" style={{ background: "transparent", color: "var(--red)", borderColor: "var(--red)", padding: "4px 8px", fontSize: 12, height: "auto" }}>Excluir</button>
+                      </form>
+                    </div>
+                  </td>
                 </tr>
               ))}
               {(!r.sources || r.sources.length === 0) && (
-                <tr><td colSpan={4} className="muted">Sem fontes nesta região.</td></tr>
+                <tr><td colSpan={5} className="muted">Sem fontes nesta região.</td></tr>
               )}
             </tbody>
           </table>

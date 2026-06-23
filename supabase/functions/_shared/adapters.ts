@@ -153,8 +153,8 @@ async function fromDiarioMunicipal(source: Source, lastMarker: string | null): P
 
     const searchHtml = await searchRes.text();
 
-    // 4. Extrair os links das matérias (geralmente href=".../materia/hash")
-    const regex = /href=["']([^"']+\/materia\/[a-zA-Z0-9]+)["']/ig;
+    // 4. Extrair os links das matérias (geralmente href=".../materia/hash" ou href=".../load/hash")
+    const regex = /href=["']([^"']+\/(?:materia|load)\/[a-zA-Z0-9]+)["']/ig;
     const links = new Set<string>();
     let match;
     while ((match = regex.exec(searchHtml)) !== null) {

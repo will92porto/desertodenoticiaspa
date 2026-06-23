@@ -53,7 +53,17 @@ export default async function ItemDetail(
       </p>
 
       <div className="card">
-        <h3>Acionar etapas manualmente</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h3 style={{ margin: 0 }}>Acionar etapas manualmente</h3>
+          <form action={async () => {
+            "use server";
+            const db = supabaseAdmin();
+            await db.from("content_items").delete().eq("id", item.id);
+            redirect("/pipeline");
+          }}>
+            <button className="btn" style={{ background: "var(--red)", borderColor: "var(--red)" }}>Excluir Pauta</button>
+          </form>
+        </div>
         <div className="row">
           {(["understand", "rank", "write", "polish"] as const).map((s) => (
             <form action={runOneStep} key={s}>
