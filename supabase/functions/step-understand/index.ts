@@ -32,6 +32,12 @@ Deno.serve(async (req) => {
       raw.text, raw.description, raw.caption, raw.transcript_hint, raw.body,
     ].filter(Boolean).join("\n\n") || JSON.stringify(raw);
 
+    // Trunca textos muito longos (como PDFs de Diário Oficial) para caber no contexto seguro (~125k tokens)
+    if (rawContent.length > 500000) {
+      console.warn(`[step-understand] rawContent muito grande (${rawContent.length} chars), truncando para 500.000...`);
+      rawContent = rawContent.substring(0, 500000) + "\n\n[...conteúdo truncado por limite de tamanho...]";
+    }
+
     let nativeTranscript: string | null = null;
     const sourceType = (source as Source)?.type ?? "";
 

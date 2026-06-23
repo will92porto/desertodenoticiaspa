@@ -10,6 +10,8 @@
 // O contrato é estável; trocar a implementação interna depois não muda o cron.
 
 import type { Source, SourceType } from "./types.ts";
+import pdf from "npm:pdf-parse";
+import { Buffer } from "node:buffer";
 
 export interface NewItem {
   external_id: string;        // identidade única dentro da fonte
@@ -113,12 +115,208 @@ async function fromWebsite(source: Source, lastMarker: string | null): Promise<F
   };
 }
 
+async function fromDiarioMunicipal(source: Source, lastMarker: string | null): Promise<FetchResult> {
+  try {
+    const sourceUrl = new URL(source.url);
+    const baseUrl = sourceUrl.origin + sourceUrl.pathname;
+
+    // 1. Acesso inicial para pegar o Cookie e o Token
+    const initRes = await fetch(baseUrl, { headers: { "User-Agent": "DesertoDeNoticiasBot/1.0" } });
+    const cookies = initRes.headers.get("set-cookie") || "";
+    const initHtml = await initRes.text();
+
+    const tokenMatch = initHtml.match(/name=["']busca_avancada\[_token\]["']\s+value=["']([^"']+)["']/i);
+    if (!tokenMatch) {
+      console.warn("[adapter:diario_municipal] Token CSRF não encontrado");
+      return { items: [], newMarker: lastMarker };
+    }
+    const token = tokenMatch[1];
+
+    // 2. Construir a URL de busca automatizada para o dia de hoje
+    // Formato pt-BR: DD/MM/YYYY
+    const todayStr = new Date().toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    
+    const searchUrl = new URL(source.url);
+    searchUrl.searchParams.set("busca_avancada[dataInicio]", todayStr);
+    searchUrl.searchParams.set("busca_avancada[dataFim]", todayStr);
+    searchUrl.searchParams.set("busca_avancada[_token]", token);
+    searchUrl.searchParams.set("busca_avancada[page]", "");
+
+    // 3. Fazer a busca
+    const searchRes = await fetch(searchUrl.toString(), {
+      headers: {
+        "User-Agent": "DesertoDeNoticiasBot/1.0",
+        "Cookie": cookies,
+        "Referer": baseUrl
+      }
+    });
+
+    const searchHtml = await searchRes.text();
+
+    // 4. Extrair os links das matérias (geralmente href=".../materia/hash")
+    const regex = /href=["']([^"']+\/materia\/[a-zA-Z0-9]+)["']/ig;
+    const links = new Set<string>();
+    let match;
+    while ((match = regex.exec(searchHtml)) !== null) {
+      const link = new URL(match[1], baseUrl).toString();
+      links.add(link);
+    }
+
+    const linksArr = Array.from(links);
+    if (linksArr.length === 0) return { items: [], newMarker: lastMarker };
+
+    // Marcador de hoje: "DD/MM/YYYY-qtdLinks" (assim se subirem novas matérias hoje, ele reprocessa ou detecta)
+    const newMarker = `${todayStr}-${linksArr.length}`;
+    if (newMarker === lastMarker) return { items: [], newMarker };
+
+    const items: NewItem[] = [];
+    // 5. Para cada link, extrair a matéria
+    for (const link of linksArr) {
+      try {
+        const matRes = await fetch(link, { headers: { "User-Agent": "DesertoDeNoticiasBot/1.0", "Cookie": cookies } });
+        const matHtml = await matRes.text();
+        
+        items.push({
+          external_id: link, // a própria URL serve como ID única
+          external_url: link,
+          title: `Publicação Diário Municipal`,
+          raw_payload: { body: matHtml.slice(0, 200_000), source_format: "diario_municipal_materia" }
+        });
+      } catch (e) {
+        console.error(`[adapter:diario_municipal] Erro ao baixar matéria ${link}:`, e);
+      }
+    }
+
+    return { items, newMarker };
+  } catch (e) {
+    console.error(`[adapter:diario_municipal] Erro geral:`, e);
+    return { items: [], newMarker: lastMarker };
+  }
+}
+
+async function fromDiarioOficial(source: Source, lastMarker: string | null): Promise<FetchResult> {
+  // Delegação específica para o portal Diário Municipal
+  if (source.url.includes("diariomunicipal.com.br/")) {
+    return fromDiarioMunicipal(source, lastMarker);
+  }
+
+  // Tenta achar um link de PDF na URL ou extrair direto se for PDF.
+  let pdfUrl = source.url;
+  
+  if (!pdfUrl.toLowerCase().endsWith(".pdf")) {
+    const html = await fetchText(source.url);
+    // Tenta encontrar o primeiro link para .pdf
+    const match = html.match(/href=["']([^"']+\.pdf)["']/i);
+    if (match && match[1]) {
+      const extractedUrl = match[1];
+      // Resolve URL relativa
+      pdfUrl = new URL(extractedUrl, source.url).toString();
+    } else {
+      // Se não achar PDF, processa como website comum (fallback)
+      return fromWebsite(source, lastMarker);
+    }
+  }
+
+  // Verifica se o PDF mudou pela URL (ou usando a própria URL como marcador temporário)
+  // Como Diários podem mudar todos os dias mas o link direto pode ter hash/data:
+  if (pdfUrl === lastMarker) {
+    return { items: [], newMarker: pdfUrl };
+  }
+
+  // Baixa o PDF
+  try {
+    const res = await fetch(pdfUrl, { headers: { "User-Agent": "DesertoDeNoticiasBot/1.0" } });
+    if (!res.ok) throw new Error(`Falha ao baixar PDF: ${res.status}`);
+    const ab = await res.arrayBuffer();
+    
+    // Extrai texto com pdf-parse
+    const data = await pdf(Buffer.from(ab));
+    const extractedText = data.text || "";
+
+    return {
+      items: [{
+        external_id: pdfUrl,
+        external_url: pdfUrl,
+        title: `Diário Oficial - ${source.name}`,
+        raw_payload: { body: extractedText, source_format: "pdf" },
+      }],
+      newMarker: pdfUrl,
+    };
+  } catch (e) {
+    console.error(`[adapter:diario_oficial] Erro ao extrair PDF de ${pdfUrl}:`, e);
+    // Em caso de erro, tenta fallback como html snapshot
+    return fromWebsite(source, lastMarker);
+  }
+}
+
 // Instagram / TikTok: requerem provedor externo (API paga). Stub explícito.
 async function fromUnsupportedSocial(source: Source, _lastMarker: string | null, type: SourceType): Promise<FetchResult> {
+  if (type === "instagram" && source.config?.rapidapi_key) {
+    return fromInstagramRapidAPI(source, _lastMarker);
+  }
   // TODO: plugar provedor (ex.: Apify actor) usando source.config.provider_token.
   // Retorna vazio para não quebrar o cron até a credencial ser configurada.
   console.warn(`[adapter:${type}] não implementado sem provedor externo: ${source.url}`);
   return { items: [], newMarker: _lastMarker ?? null };
+}
+
+async function fromInstagramRapidAPI(source: Source, lastMarker: string | null): Promise<FetchResult> {
+  const apiKey = source.config?.rapidapi_key as string;
+  // Extrai o username da URL
+  const usernameMatch = source.url.match(/instagram\.com\/([a-zA-Z0-9_.-]+)/);
+  const username = usernameMatch ? usernameMatch[1] : source.url.replace(/[^a-zA-Z0-9_.-]/g, "");
+
+  // Utiliza a API "Instagram Bulk Scraper Latest" do RapidAPI como exemplo de endpoint gratuito viável
+  const apiUrl = `https://instagram-bulk-scraper-latest.p.rapidapi.com/webuser_info/${username}`;
+  
+  try {
+    const res = await fetch(apiUrl, {
+      headers: {
+        "x-rapidapi-key": apiKey,
+        "x-rapidapi-host": "instagram-bulk-scraper-latest.p.rapidapi.com"
+      }
+    });
+
+    if (!res.ok) {
+       console.error(`[adapter:instagram] Erro na API do RapidAPI: ${res.status}`);
+       return { items: [], newMarker: lastMarker };
+    }
+
+    const data = await res.json();
+    const edges = data?.data?.user?.edge_owner_to_timeline_media?.edges ?? [];
+    if (edges.length === 0) return { items: [], newMarker: lastMarker };
+    
+    const newMarker = edges[0].node.id ?? lastMarker;
+    let fresh = edges;
+    if (lastMarker) {
+      const idx = edges.findIndex((e: any) => e.node.id === lastMarker);
+      fresh = idx === -1 ? edges : edges.slice(0, idx);
+    }
+
+    const items: NewItem[] = [];
+    for (const edge of fresh) {
+      const node = edge.node;
+      const caption = node.edge_media_to_caption?.edges?.[0]?.node?.text || "";
+      const shortcode = node.shortcode;
+      const imageUrl = node.display_url;
+
+      items.push({
+        external_id: node.id,
+        external_url: `https://www.instagram.com/p/${shortcode}/`,
+        title: caption ? `${caption.slice(0, 50)}...` : `Post do Instagram (${shortcode})`,
+        raw_payload: {
+          caption,
+          imageUrl,
+          source_format: "instagram"
+        }
+      });
+    }
+
+    return { items, newMarker };
+  } catch (e) {
+    console.error(`[adapter:instagram] Erro na request RapidAPI:`, e);
+    return { items: [], newMarker: lastMarker };
+  }
 }
 
 export async function fetchNewItems(source: Source): Promise<FetchResult> {
@@ -133,6 +331,7 @@ export async function fetchNewItems(source: Source): Promise<FetchResult> {
       return fromFeedLike(source, last, feed);
     }
     case "diario_oficial":
+      return fromDiarioOficial(source, last);
     case "website":
       return fromWebsite(source, last);
     case "instagram":
