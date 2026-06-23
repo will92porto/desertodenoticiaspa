@@ -89,11 +89,15 @@ export default async function ItemDetail(
             </form>
             <form action={async () => {
               "use server";
-              const db = supabaseAdmin();
-              // Remove logs primeiro para evitar erro de Foreign Key
-              await db.from("pipeline_runs").delete().eq("content_item_id", item.id);
-              // Depois remove o item
-              await db.from("content_items").delete().eq("id", item.id);
+              try {
+                const db = supabaseAdmin();
+                const { error: e1 } = await db.from("pipeline_runs").delete().eq("content_item_id", item.id);
+                if (e1) console.error("Erro ao apagar logs:", e1);
+                const { error: e2 } = await db.from("content_items").delete().eq("id", item.id);
+                if (e2) console.error("Erro ao apagar item:", e2);
+              } catch (err) {
+                console.error("Exceção ao excluir:", err);
+              }
               redirect("/pipeline");
             }}>
               <button className="btn" style={{ background: "var(--red)", borderColor: "var(--red)" }}>Excluir Pauta</button>

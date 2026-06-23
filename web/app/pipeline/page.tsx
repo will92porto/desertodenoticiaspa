@@ -36,6 +36,23 @@ async function publish(formData: FormData) {
   });
 }
 
+async function massDelete(formData: FormData) {
+  "use server";
+  const ids = formData.getAll("ids");
+  if (!ids || ids.length === 0) return;
+  
+  try {
+    const db = supabaseAdmin();
+    const idList = ids.map(id => String(id));
+    await db.from("pipeline_runs").delete().in("content_item_id", idList);
+    await db.from("content_items").delete().in("id", idList);
+  } catch (err) {
+    console.error("Exceção ao excluir em massa:", err);
+  }
+  revalidatePath("/pipeline");
+  redirect("/pipeline");
+}
+
 const STATUS_LABEL: Record<string, string> = {
   captured: "captado", understanding: "entendendo", understood: "entendido",
   ranking: "rankeando", ranked: "rankeado", discarded: "descartado",
@@ -104,9 +121,16 @@ export default async function PipelinePage(
       </div>
 
       <div className="card">
-        <table>
-          <thead>
-            <tr>
+        <form>
+          <div style={{ marginBottom: "1rem" }}>
+            <button formAction={massDelete} className="btn" style={{ background: "var(--red)", borderColor: "var(--red)", padding: "4px 8px", fontSize: "0.85rem" }}>
+              Excluir Selecionados
+            </button>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th style={{ width: 40 }}></th>
               <th><a href="?sort=title&order=asc" className="muted">Título</a></th>
               <th><a href="?sort=source&order=asc" className="muted">Fonte</a></th>
               <th><a href="?sort=created_at&order=desc" className="muted">Criado em</a></th>
@@ -119,6 +143,9 @@ export default async function PipelinePage(
           <tbody>
             {(items ?? []).map((it: any) => (
               <tr key={it.id}>
+                <td>
+                  <input type="checkbox" name="ids" value={it.id} />
+                </td>
                 <td><a href={`/pipeline/${it.id}`}>{it.title || "(sem título)"}</a></td>
                 <td className="muted">{it.sources?.name ?? "—"}</td>
                 <td className="muted" style={{ fontSize: "0.85rem" }}>
@@ -129,19 +156,17 @@ export default async function PipelinePage(
                 <td>{it.rank_score ?? "—"}</td>
                 <td>
                   {it.status === "ready" && (
-                    <form action={publish}>
-                      <input type="hidden" name="id" value={it.id} />
-                      <button className="btn secondary">Publicar</button>
-                    </form>
+                    <button formAction={publish} name="id" value={it.id} className="btn secondary">Publicar</button>
                   )}
                 </td>
               </tr>
             ))}
             {(!items || items.length === 0) && (
-              <tr><td colSpan={7} className="muted">Nenhum item no pipeline ainda.</td></tr>
+              <tr><td colSpan={8} className="muted">Nenhum item no pipeline ainda.</td></tr>
             )}
           </tbody>
         </table>
+        </form>
       </div>
     </div>
   );
