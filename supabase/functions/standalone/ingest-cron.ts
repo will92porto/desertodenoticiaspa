@@ -265,13 +265,68 @@ async function fromInstagramRapidAPI(source, lastMarker) {
     return { items: [], newMarker: lastMarker };
   }
 }
+async function fromYoutubeScraper(source, lastMarker) {
+  try {
+    const res = await fetch(source.url, { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } });
+    const html = await res.text();
+    const match = html.match(/ytInitialData\s*=\s*({.+?});/);
+    if (!match) return { items: [], newMarker: lastMarker };
+    const data = JSON.parse(match[1]);
+    const tabs = data.contents?.twoColumnBrowseResultsRenderer?.tabs;
+    let targetTab = tabs?.find((t) => t.tabRenderer?.selected === true);
+    if (!targetTab) return { items: [], newMarker: lastMarker };
+    const items = targetTab.tabRenderer?.content?.richGridRenderer?.contents || [];
+    const videos = [];
+    for (const i of items) {
+      if (!i.richItemRenderer) continue;
+      const c = i.richItemRenderer.content;
+      let id, title;
+      if (c.videoRenderer) {
+        id = c.videoRenderer.videoId;
+        title = c.videoRenderer.title?.runs?.[0]?.text;
+      } else if (c.lockupViewModel) {
+        id = c.lockupViewModel.contentId;
+        title = c.lockupViewModel.metadata?.lockupMetadataViewModel?.title?.content;
+      }
+      if (id && title) {
+        videos.push({ id, title, url: "https://www.youtube.com/watch?v=" + id });
+      }
+    }
+    if (videos.length === 0) return { items: [], newMarker: lastMarker };
+    const newMarker = videos[0].id ?? lastMarker;
+    let fresh = videos;
+    if (lastMarker) {
+      const idx = videos.findIndex((v) => v.id === lastMarker);
+      fresh = idx === -1 ? videos : videos.slice(0, idx);
+    }
+    const resultItems = [];
+    for (const v of fresh) {
+      resultItems.push({
+        external_id: v.id,
+        external_url: v.url,
+        title: v.title,
+        raw_payload: { videoId: v.id, title: v.title, source_format: "youtube_video" }
+      });
+    }
+    return { items: resultItems, newMarker };
+  } catch (e) {
+    console.error(`[adapter:youtube] Erro no scraper direto:`, e);
+    return { items: [], newMarker: lastMarker };
+  }
+}
 async function fetchNewItems(source) {
   const last = source.last_seen_marker;
   switch (source.type) {
     case "youtube": {
+      if (source.url.includes("/streams") || source.url.includes("/videos") || source.url.includes("@")) {
+        const scraperRes = await fromYoutubeScraper(source, last);
+        if (scraperRes.items.length > 0 || scraperRes.newMarker !== last) {
+          return scraperRes;
+        }
+      }
       const feed = youtubeFeedUrl(source);
       if (!feed) {
-        console.warn(`[adapter:youtube] sem channel_id/feed para ${source.url}`);
+        console.warn(`[adapter:youtube] sem channel_id/feed e scraper falhou para ${source.url}`);
         return { items: [], newMarker: last };
       }
       return fromFeedLike(source, last, feed);
