@@ -264,20 +264,31 @@ async function fromUnsupportedSocial(source: Source, _lastMarker: string | null,
 }
 
 async function fromInstagramRapidAPI(source: Source, lastMarker: string | null): Promise<FetchResult> {
-  const apiKey = source.config?.rapidapi_key as string;
-  // Extrai o username da URL
+  // Pega a chave que o usuário passou (pode vir do banco source.config.rapidapi_key ou da variável de ambiente)
+  const apiKey = (source.config?.rapidapi_key as string) || Deno.env.get("RAPIDAPI_KEY") || "852d65438amsh865b038efa64420p176ca0jsn30ff032bead7";
+  
+  // Extrai o username ou a URL inteira
   const usernameMatch = source.url.match(/instagram\.com\/([a-zA-Z0-9_.-]+)/);
   const username = usernameMatch ? usernameMatch[1] : source.url.replace(/[^a-zA-Z0-9_.-]/g, "");
 
-  // Utiliza a API "Instagram Bulk Scraper Latest" do RapidAPI como exemplo de endpoint gratuito viável
-  const apiUrl = `https://instagram-bulk-scraper-latest.p.rapidapi.com/webuser_info/${username}`;
+  // ATENÇÃO: O usuário forneceu o endpoint get_ig_user_followers_v2.php
+  const apiUrl = `https://instagram-scraper-stable-api.p.rapidapi.com/get_ig_user_followers_v2.php`;
   
+  const formData = new URLSearchParams();
+  formData.append("username_or_url", source.url); // url do projeto
+  formData.append("data", "following"); // exatamente como o snippet enviado
+  formData.append("amount", "12");
+  // formData.append("pagination_token", "");
+
   try {
     const res = await fetch(apiUrl, {
+      method: "POST",
       headers: {
         "x-rapidapi-key": apiKey,
-        "x-rapidapi-host": "instagram-bulk-scraper-latest.p.rapidapi.com"
-      }
+        "x-rapidapi-host": "instagram-scraper-stable-api.p.rapidapi.com",
+        "Content-Type": "application/x-www-form-urlencoded"
+      },
+      body: formData.toString()
     });
 
     if (!res.ok) {
@@ -286,27 +297,27 @@ async function fromInstagramRapidAPI(source: Source, lastMarker: string | null):
     }
 
     const data = await res.json();
-    const edges = data?.data?.user?.edge_owner_to_timeline_media?.edges ?? [];
-    if (edges.length === 0) return { items: [], newMarker: lastMarker };
+    // Exemplo de como a API poderia retornar (ajustar conforme a resposta real do RapidAPI)
+    const posts = data?.data ?? [];
+    if (posts.length === 0) return { items: [], newMarker: lastMarker };
     
-    const newMarker = edges[0].node.id ?? lastMarker;
-    let fresh = edges;
+    const newMarker = posts[0].id ?? lastMarker;
+    let fresh = posts;
     if (lastMarker) {
-      const idx = edges.findIndex((e: any) => e.node.id === lastMarker);
-      fresh = idx === -1 ? edges : edges.slice(0, idx);
+      const idx = posts.findIndex((p: any) => p.id === lastMarker);
+      fresh = idx === -1 ? posts : posts.slice(0, idx);
     }
 
     const items: NewItem[] = [];
-    for (const edge of fresh) {
-      const node = edge.node;
-      const caption = node.edge_media_to_caption?.edges?.[0]?.node?.text || "";
-      const shortcode = node.shortcode;
-      const imageUrl = node.display_url;
+    for (const post of fresh) {
+      const caption = post.caption || "";
+      const shortcode = post.shortcode || "";
+      const imageUrl = post.display_url || post.thumbnail_url || "";
 
       items.push({
-        external_id: node.id,
+        external_id: post.id || shortcode,
         external_url: `https://www.instagram.com/p/${shortcode}/`,
-        title: caption ? `${caption.slice(0, 50)}...` : `Post do Instagram (${shortcode})`,
+        title: caption ? `${caption.slice(0, 50)}...` : `Post do Instagram`,
         raw_payload: {
           caption,
           imageUrl,
