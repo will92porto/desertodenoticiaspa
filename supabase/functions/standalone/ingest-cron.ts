@@ -213,12 +213,9 @@ async function fromUnsupportedSocial(source, _lastMarker, type) {
 }
 async function fromInstagramRapidAPI(source, lastMarker) {
   const apiKey = source.config?.rapidapi_key || Deno.env.get("RAPIDAPI_KEY") || "852d65438amsh865b038efa64420p176ca0jsn30ff032bead7";
-  const usernameMatch = source.url.match(/instagram\.com\/([a-zA-Z0-9_.-]+)/);
-  const username = usernameMatch ? usernameMatch[1] : source.url.replace(/[^a-zA-Z0-9_.-]/g, "");
-  const apiUrl = `https://instagram-scraper-stable-api.p.rapidapi.com/get_ig_user_followers_v2.php`;
+  const apiUrl = `https://instagram-scraper-stable-api.p.rapidapi.com/get_ig_user_posts.php`;
   const formData = new URLSearchParams();
   formData.append("username_or_url", source.url);
-  formData.append("data", "following");
   formData.append("amount", "12");
   try {
     const res = await fetch(apiUrl, {
@@ -235,26 +232,28 @@ async function fromInstagramRapidAPI(source, lastMarker) {
       return { items: [], newMarker: lastMarker };
     }
     const data = await res.json();
-    const posts = data?.data ?? [];
+    const posts = data?.posts ?? [];
     if (posts.length === 0) return { items: [], newMarker: lastMarker };
-    const newMarker = posts[0].id ?? lastMarker;
+    const newMarker = posts[0].node?.id ?? posts[0].node?.pk ?? lastMarker;
     let fresh = posts;
     if (lastMarker) {
-      const idx = posts.findIndex((p) => p.id === lastMarker);
+      const idx = posts.findIndex((p) => p.node?.id === lastMarker || p.node?.pk === lastMarker);
       fresh = idx === -1 ? posts : posts.slice(0, idx);
     }
     const items = [];
-    for (const post of fresh) {
-      const caption = post.caption || "";
-      const shortcode = post.shortcode || "";
-      const imageUrl = post.display_url || post.thumbnail_url || "";
+    for (const postWrapper of fresh) {
+      const post = postWrapper.node ?? postWrapper;
+      const captionObj = post.caption ?? {};
+      const captionText = captionObj.text ?? post.caption ?? "";
+      const shortcode = post.code ?? post.shortcode ?? "";
+      const id = post.id ?? post.pk ?? shortcode;
       items.push({
-        external_id: post.id || shortcode,
+        external_id: id,
         external_url: `https://www.instagram.com/p/${shortcode}/`,
-        title: caption ? `${caption.slice(0, 50)}...` : `Post do Instagram`,
+        title: captionText ? `${captionText.slice(0, 50)}...` : `Post do Instagram`,
         raw_payload: {
-          caption,
-          imageUrl,
+          caption: captionText,
+          shortcode,
           source_format: "instagram"
         }
       });

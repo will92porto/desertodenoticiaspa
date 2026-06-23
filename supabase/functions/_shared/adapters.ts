@@ -264,21 +264,13 @@ async function fromUnsupportedSocial(source: Source, _lastMarker: string | null,
 }
 
 async function fromInstagramRapidAPI(source: Source, lastMarker: string | null): Promise<FetchResult> {
-  // Pega a chave que o usuário passou (pode vir do banco source.config.rapidapi_key ou da variável de ambiente)
   const apiKey = (source.config?.rapidapi_key as string) || Deno.env.get("RAPIDAPI_KEY") || "852d65438amsh865b038efa64420p176ca0jsn30ff032bead7";
   
-  // Extrai o username ou a URL inteira
-  const usernameMatch = source.url.match(/instagram\.com\/([a-zA-Z0-9_.-]+)/);
-  const username = usernameMatch ? usernameMatch[1] : source.url.replace(/[^a-zA-Z0-9_.-]/g, "");
-
-  // ATENÇÃO: O usuário forneceu o endpoint get_ig_user_followers_v2.php
-  const apiUrl = `https://instagram-scraper-stable-api.p.rapidapi.com/get_ig_user_followers_v2.php`;
+  const apiUrl = `https://instagram-scraper-stable-api.p.rapidapi.com/get_ig_user_posts.php`;
   
   const formData = new URLSearchParams();
-  formData.append("username_or_url", source.url); // url do projeto
-  formData.append("data", "following"); // exatamente como o snippet enviado
+  formData.append("username_or_url", source.url);
   formData.append("amount", "12");
-  // formData.append("pagination_token", "");
 
   try {
     const res = await fetch(apiUrl, {
@@ -297,30 +289,32 @@ async function fromInstagramRapidAPI(source: Source, lastMarker: string | null):
     }
 
     const data = await res.json();
-    // Exemplo de como a API poderia retornar (ajustar conforme a resposta real do RapidAPI)
-    const posts = data?.data ?? [];
+    const posts = data?.posts ?? [];
     if (posts.length === 0) return { items: [], newMarker: lastMarker };
     
-    const newMarker = posts[0].id ?? lastMarker;
+    // O ID pode estar em post.node.id ou post.node.pk
+    const newMarker = posts[0].node?.id ?? posts[0].node?.pk ?? lastMarker;
     let fresh = posts;
     if (lastMarker) {
-      const idx = posts.findIndex((p: any) => p.id === lastMarker);
+      const idx = posts.findIndex((p: any) => (p.node?.id === lastMarker || p.node?.pk === lastMarker));
       fresh = idx === -1 ? posts : posts.slice(0, idx);
     }
 
     const items: NewItem[] = [];
-    for (const post of fresh) {
-      const caption = post.caption || "";
-      const shortcode = post.shortcode || "";
-      const imageUrl = post.display_url || post.thumbnail_url || "";
+    for (const postWrapper of fresh) {
+      const post = postWrapper.node ?? postWrapper;
+      const captionObj = post.caption ?? {};
+      const captionText = captionObj.text ?? post.caption ?? "";
+      const shortcode = post.code ?? post.shortcode ?? "";
+      const id = post.id ?? post.pk ?? shortcode;
 
       items.push({
-        external_id: post.id || shortcode,
+        external_id: id,
         external_url: `https://www.instagram.com/p/${shortcode}/`,
-        title: caption ? `${caption.slice(0, 50)}...` : `Post do Instagram`,
+        title: captionText ? `${captionText.slice(0, 50)}...` : `Post do Instagram`,
         raw_payload: {
-          caption,
-          imageUrl,
+          caption: captionText,
+          shortcode,
           source_format: "instagram"
         }
       });
