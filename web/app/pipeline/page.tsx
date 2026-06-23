@@ -72,7 +72,7 @@ export default async function PipelinePage(
   let items = rawItems ?? [];
 
   if (sortCol === "source") {
-    items.sort((a, b) => {
+    items.sort((a: any, b: any) => {
       const s1 = a.sources?.name || "";
       const s2 = b.sources?.name || "";
       return sortOrder ? s1.localeCompare(s2) : s2.localeCompare(s1);
