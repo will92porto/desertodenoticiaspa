@@ -304,7 +304,10 @@ async function fromInstagramRapidAPI(source: Source, lastMarker: string | null):
     for (const postWrapper of fresh) {
       const post = postWrapper.node ?? postWrapper;
       const captionObj = post.caption ?? {};
-      const captionText = captionObj.text ?? post.caption ?? "";
+      const baseCaption = captionObj.text ?? post.caption ?? "";
+      const accessibilityCaption = post.accessibility_caption ?? "";
+      const captionText = [baseCaption, accessibilityCaption].filter(Boolean).join("\n\n");
+
       const shortcode = post.code ?? post.shortcode ?? "";
       const id = post.id ?? post.pk ?? shortcode;
 
