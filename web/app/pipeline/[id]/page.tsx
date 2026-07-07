@@ -28,6 +28,7 @@ async function runOneStep(formData: FormData) {
     msg = `${step} ERRO: ${e instanceof Error ? e.message : String(e)}`;
   }
   revalidatePath(`/pipeline/${id}`);
+  revalidatePath(`/pipeline`);
   redirect(`/pipeline/${id}?msg=${encodeURIComponent(msg.slice(0, 500))}`);
 }
 
@@ -55,6 +56,7 @@ async function runAllSteps(formData: FormData) {
     msg = `ERRO na execução em lote: ${e instanceof Error ? e.message : String(e)}`;
   }
   revalidatePath(`/pipeline/${id}`);
+  revalidatePath(`/pipeline`);
   redirect(`/pipeline/${id}?msg=${encodeURIComponent(msg.slice(0, 500))}`);
 }
 
