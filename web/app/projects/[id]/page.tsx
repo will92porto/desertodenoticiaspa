@@ -44,6 +44,22 @@ async function deleteSource(formData: FormData) {
   revalidatePath(`/projects/${String(formData.get("project_id"))}`);
 }
 
+async function updateWordPressConfig(formData: FormData) {
+  "use server";
+  const db = supabaseAdmin();
+  const pid = String(formData.get("project_id"));
+  const { error } = await db.from("projects").update({
+    wordpress_base_url: String(formData.get("wordpress_base_url") || ""),
+    wordpress_username: String(formData.get("wordpress_username") || ""),
+    wordpress_app_password_secret: String(formData.get("wordpress_app_password_secret") || ""),
+  }).eq("id", pid);
+  
+  if (error) {
+    redirect(`/projects/${pid}?erro=${encodeURIComponent(`WordPress: ${error.message}`)}`);
+  }
+  revalidatePath(`/projects/${pid}`);
+}
+
 export default async function ProjectDetail(
   { params, searchParams }: { params: { id: string }; searchParams: { erro?: string } },
 ) {
@@ -63,6 +79,34 @@ export default async function ProjectDetail(
       )}
       <h2>{project.name}</h2>
       <p className="muted">{project.description}</p>
+
+      <div className="card">
+        <h3>Sincronização WordPress</h3>
+        <p className="muted" style={{ fontSize: "0.85rem", marginBottom: "1rem" }}>
+          Configure as credenciais para publicar os artigos automaticamente como rascunhos. 
+          Use uma "Application Password" do WordPress.
+        </p>
+        <form action={updateWordPressConfig} className="row" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+          <input type="hidden" name="project_id" value={project.id} />
+          
+          <label className="field" style={{ flex: "1 1 200px" }}>
+            <span>URL do WordPress</span>
+            <input name="wordpress_base_url" placeholder="Ex: https://meusite.com.br" defaultValue={project.wordpress_base_url || ""} />
+          </label>
+          
+          <label className="field" style={{ flex: "1 1 150px" }}>
+            <span>Usuário</span>
+            <input name="wordpress_username" placeholder="Login" defaultValue={project.wordpress_username || ""} />
+          </label>
+          
+          <label className="field" style={{ flex: "1 1 200px" }}>
+            <span>Senha de Aplicativo (Application Password)</span>
+            <input type="password" name="wordpress_app_password_secret" placeholder="••••••••" defaultValue={project.wordpress_app_password_secret || ""} />
+          </label>
+
+          <button className="btn" type="submit" style={{ marginBottom: "12px" }}>Salvar WordPress</button>
+        </form>
+      </div>
 
       <div className="card">
         <h3>Adicionar região</h3>

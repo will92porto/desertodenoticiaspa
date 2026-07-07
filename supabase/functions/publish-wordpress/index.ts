@@ -43,8 +43,9 @@ Deno.serve(async (req) => {
       return json({ error: "projeto sem WordPress configurado" }, 400);
     }
 
-    // Application Password guardada como secret nomeado em wordpress_app_password_secret.
-    const appPw = Deno.env.get(project.wordpress_app_password_secret ?? "") ??
+    // Obtém a senha do WordPress direto do banco (UI) ou faz fallback para variáveis de ambiente
+    const appPw = project.wordpress_app_password_secret ||
+                  Deno.env.get(project.wordpress_app_password_secret ?? "") ||
                   Deno.env.get("WORDPRESS_APP_PASSWORD");
     if (!appPw) return json({ error: "senha de aplicação do WordPress ausente" }, 400);
 
