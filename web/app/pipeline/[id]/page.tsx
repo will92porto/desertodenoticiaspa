@@ -12,6 +12,7 @@ const STEP_FN: Record<string, string> = {
   rank: "step-rank",
   write: "step-write",
   polish: "step-polish",
+  publish: "publish-wordpress",
 };
 
 async function runOneStep(formData: FormData) {
@@ -109,7 +110,7 @@ export default async function ItemDetail(
           </div>
         </div>
         <div className="row">
-          {(["understand", "rank", "write", "polish"] as const).map((s) => (
+          {(["understand", "rank", "write", "polish", "publish"] as const).map((s) => (
             <form action={runOneStep} key={s}>
               <AutoRefresh />
               <input type="hidden" name="id" value={item.id} />
