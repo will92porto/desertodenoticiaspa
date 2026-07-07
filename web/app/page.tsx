@@ -5,19 +5,23 @@ export const dynamic = "force-dynamic";
 export default async function Dashboard() {
   const db = supabaseAdmin();
 
-  const [{ count: projects }, { count: sources }, { count: ready }, { count: published }] =
+  const [{ count: projects }, { count: sources }, { count: ready }, { count: published }, { count: created }, { count: discarded }] =
     await Promise.all([
       db.from("projects").select("*", { count: "exact", head: true }),
       db.from("sources").select("*", { count: "exact", head: true }),
       db.from("content_items").select("*", { count: "exact", head: true }).eq("status", "ready"),
       db.from("content_items").select("*", { count: "exact", head: true }).eq("status", "published"),
+      db.from("content_items").select("*", { count: "exact", head: true }),
+      db.from("content_items").select("*", { count: "exact", head: true }).eq("status", "discarded"),
     ]);
 
   const stats = [
-    { label: "Projetos", value: projects ?? 0 },
-    { label: "Fontes", value: sources ?? 0 },
+    { label: "Total Captados/Criados", value: created ?? 0 },
+    { label: "Rejeitados (Descartados)", value: discarded ?? 0 },
     { label: "Prontas p/ publicar", value: ready ?? 0 },
     { label: "Publicadas", value: published ?? 0 },
+    { label: "Projetos", value: projects ?? 0 },
+    { label: "Fontes", value: sources ?? 0 },
   ];
 
   return (

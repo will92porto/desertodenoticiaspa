@@ -142,7 +142,7 @@ export default async function PipelinePage(
           </thead>
           <tbody>
             {(items ?? []).map((it: any) => (
-              <tr key={it.id}>
+              <tr key={it.id} style={{ opacity: it.status === "discarded" ? 0.6 : 1 }}>
                 <td>
                   <input type="checkbox" name="ids" value={it.id} />
                 </td>
@@ -152,7 +152,21 @@ export default async function PipelinePage(
                   {it.created_at ? new Date(it.created_at).toLocaleString("pt-BR") : "—"}
                 </td>
                 <td className="muted">{it.regions?.name ?? "—"}</td>
-                <td><span className="badge">{STATUS_LABEL[it.status] ?? it.status}</span></td>
+                <td>
+                  <span className="badge" style={{
+                    background: it.status === "discarded" || it.status === "error" ? "rgba(224, 87, 75, 0.15)" : 
+                                it.status === "ready" || it.status === "published" ? "rgba(76, 175, 80, 0.15)" : 
+                                it.status === "publishing" ? "rgba(224, 164, 88, 0.15)" : undefined,
+                    color: it.status === "discarded" || it.status === "error" ? "var(--red)" : 
+                           it.status === "ready" || it.status === "published" ? "var(--green)" : 
+                           it.status === "publishing" ? "var(--accent)" : undefined,
+                    borderColor: it.status === "discarded" || it.status === "error" ? "rgba(224, 87, 75, 0.3)" : 
+                                 it.status === "ready" || it.status === "published" ? "rgba(76, 175, 80, 0.3)" : 
+                                 it.status === "publishing" ? "rgba(224, 164, 88, 0.3)" : undefined
+                  }}>
+                    {STATUS_LABEL[it.status] ?? it.status}
+                  </span>
+                </td>
                 <td>{it.rank_score ?? "—"}</td>
                 <td>
                   {it.status === "ready" && (

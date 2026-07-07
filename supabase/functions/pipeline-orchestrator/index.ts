@@ -6,7 +6,8 @@
 //   understood -> step-rank
 //   ranked     -> step-write
 //   written    -> step-polish
-// (ready/published/discarded/error não avançam automaticamente.)
+//   ready      -> publish-wordpress
+// (published/discarded/error não avançam automaticamente.)
 
 import { adminClient } from "../_shared/db.ts";
 import { json, handleOptions } from "../_shared/http.ts";
@@ -16,6 +17,7 @@ const NEXT: Record<string, string> = {
   understood: "step-rank",
   ranked: "step-write",
   written: "step-polish",
+  ready: "publish-wordpress",
 };
 
 // Quantos itens processar por invocação (evita timeout da function).
