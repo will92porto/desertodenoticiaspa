@@ -39,10 +39,6 @@ async function callGemini(p) {
     "google/gemini-2.5-flash-lite"
   ];
   let finalUserPrompt = p.userPrompt;
-  if (p.youtubeUrl) {
-    finalUserPrompt += `
-
-[URL do V\xEDdeo referenciado: ${p.youtubeUrl}]`;
   }
   const body = {
     models: modelsToTry,

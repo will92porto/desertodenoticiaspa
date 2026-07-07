@@ -2,6 +2,10 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseAdmin, invokeFunction } from "@/lib/supabase";
 
+import { SubmitButton } from "@/components/SubmitButton";
+import { AdvancePipelineButton } from "@/components/AdvancePipelineButton";
+import { AutoRefresh } from "@/components/AutoRefresh";
+
 export const dynamic = "force-dynamic";
 
 // Executa uma chamada de função e mostra o resultado/erro na própria tela
@@ -18,31 +22,28 @@ async function runAndReport(label: string, fn: string, body: unknown) {
   redirect(`/pipeline?msg=${encodeURIComponent(msg.slice(0, 500))}`);
 }
 
-async function runOrchestrator() {
-  "use server";
-  await runAndReport("Avançar", "pipeline-orchestrator", {});
-}
-
 async function runIngest() {
   "use server";
   await runAndReport("Captar", "ingest-cron", {});
 }
 
-async function publish(formData: FormData) {
+async function publish(id: string) {
   "use server";
   await runAndReport("Publicar", "publish-wordpress", {
-    content_item_id: String(formData.get("id")),
+    content_item_id: id,
     status: "draft",
   });
 }
 
-async function massAdvance(formData: FormData) {
+async function advanceStepAction(ids?: string[]) {
   "use server";
-  const ids = formData.getAll("ids");
-  if (!ids || ids.length === 0) return;
-  const idList = ids.map(id => String(id));
-  
-  await runAndReport("Avançar Selecionados", "pipeline-orchestrator", { ids: idList });
+  try {
+    const res = await invokeFunction("pipeline-orchestrator", { ids: ids || [] });
+    if (res.error) return { done: true, error: res.error };
+    return { done: res.done === true, error: undefined };
+  } catch (e: any) {
+    return { done: true, error: e.message };
+  }
 }
 
 async function massDelete(formData: FormData) {
@@ -124,20 +125,36 @@ export default async function PipelinePage(
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h2>Pipeline</h2>
         <div className="row">
-          <form action={runIngest}><button className="btn secondary">Captar fontes agora</button></form>
-          <form action={runOrchestrator}><button className="btn">Avançar pipeline</button></form>
+          <form action={runIngest}>
+            <AutoRefresh />
+            <SubmitButton className="btn secondary">Captar fontes agora</SubmitButton>
+          </form>
+          <form>
+            <AutoRefresh />
+            <AdvancePipelineButton 
+              actionFn={advanceStepAction}
+              className="btn" 
+              confirmMessage="Isto iniciará o processamento de todos os itens disponíveis. Deseja continuar?"
+              label="Avançar pipeline"
+            />
+          </form>
         </div>
       </div>
 
       <div className="card">
         <form>
+          <AutoRefresh />
           <div style={{ marginBottom: "1rem", display: "flex", gap: "10px" }}>
-            <button formAction={massDelete} className="btn" style={{ background: "var(--red)", borderColor: "var(--red)", padding: "4px 8px", fontSize: "0.85rem" }}>
+            <SubmitButton formAction={massDelete} className="btn" style={{ background: "var(--red)", borderColor: "var(--red)", padding: "4px 8px", fontSize: "0.85rem" }} confirmMessage="Tem certeza que deseja excluir as pautas selecionadas?">
               Excluir Selecionados
-            </button>
-            <button formAction={massAdvance} className="btn secondary" style={{ padding: "4px 8px", fontSize: "0.85rem" }}>
-              Avançar Selecionados
-            </button>
+            </SubmitButton>
+            <AdvancePipelineButton 
+              actionFn={advanceStepAction}
+              className="btn secondary" 
+              style={{ padding: "4px 8px", fontSize: "0.85rem" }} 
+              confirmMessage="Deseja avançar todas as pautas selecionadas?"
+              label="Avançar Selecionados"
+            />
           </div>
           <table>
             <thead>
@@ -168,13 +185,13 @@ export default async function PipelinePage(
                   <span className="badge" style={{
                     background: it.status === "discarded" || it.status === "error" ? "rgba(224, 87, 75, 0.15)" : 
                                 it.status === "ready" || it.status === "published" ? "rgba(76, 175, 80, 0.15)" : 
-                                it.status === "publishing" ? "rgba(224, 164, 88, 0.15)" : undefined,
+                                it.status === "publishing" || it.status === "understanding" || it.status === "ranking" || it.status === "writing" || it.status === "polishing" ? "rgba(224, 164, 88, 0.15)" : undefined,
                     color: it.status === "discarded" || it.status === "error" ? "var(--red)" : 
                            it.status === "ready" || it.status === "published" ? "var(--green)" : 
-                           it.status === "publishing" ? "var(--accent)" : undefined,
+                           it.status === "publishing" || it.status === "understanding" || it.status === "ranking" || it.status === "writing" || it.status === "polishing" ? "var(--accent)" : undefined,
                     borderColor: it.status === "discarded" || it.status === "error" ? "rgba(224, 87, 75, 0.3)" : 
                                  it.status === "ready" || it.status === "published" ? "rgba(76, 175, 80, 0.3)" : 
-                                 it.status === "publishing" ? "rgba(224, 164, 88, 0.3)" : undefined
+                                 it.status === "publishing" || it.status === "understanding" || it.status === "ranking" || it.status === "writing" || it.status === "polishing" ? "rgba(224, 164, 88, 0.3)" : undefined
                   }}>
                     {STATUS_LABEL[it.status] ?? it.status}
                   </span>
@@ -182,7 +199,7 @@ export default async function PipelinePage(
                 <td>{it.rank_score ?? "—"}</td>
                 <td>
                   {it.status === "ready" && (
-                    <button formAction={publish} name="id" value={it.id} className="btn secondary">Publicar</button>
+                    <SubmitButton formAction={publish.bind(null, it.id)} className="btn secondary" confirmMessage="Publicar no WordPress?">Publicar</SubmitButton>
                   )}
                 </td>
               </tr>

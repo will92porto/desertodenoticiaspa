@@ -34,9 +34,6 @@ export async function callGemini(p: GeminiCallParams): Promise<GeminiResult> {
       ];
 
   let finalUserPrompt = p.userPrompt;
-  if (p.youtubeUrl) {
-    finalUserPrompt += `\n\n[URL do Vídeo referenciado: ${p.youtubeUrl}]`;
-  }
 
   const body: any = {
     models: modelsToTry,

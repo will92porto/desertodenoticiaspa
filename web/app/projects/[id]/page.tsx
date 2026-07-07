@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -104,7 +105,7 @@ export default async function ProjectDetail(
             <input type="password" name="wordpress_app_password_secret" placeholder="••••••••" defaultValue={project.wordpress_app_password_secret || ""} />
           </label>
 
-          <button className="btn" type="submit" style={{ marginBottom: "12px" }}>Salvar WordPress</button>
+          <SubmitButton className="btn" type="submit" style={{ marginBottom: "12px" }}>Salvar WordPress</SubmitButton>
         </form>
       </div>
 
@@ -114,7 +115,7 @@ export default async function ProjectDetail(
           <input type="hidden" name="project_id" value={project.id} />
           <input name="name" placeholder="Nome da região (ex.: Sertão Central - CE)" required />
           <input name="state" placeholder="UF" style={{ maxWidth: 80 }} />
-          <button className="btn" type="submit">Adicionar</button>
+          <SubmitButton className="btn" type="submit">Adicionar</SubmitButton>
         </form>
       </div>
 
@@ -137,7 +138,7 @@ export default async function ProjectDetail(
                       <form action={deleteSource}>
                         <input type="hidden" name="project_id" value={project.id} />
                         <input type="hidden" name="source_id" value={s.id} />
-                        <button className="btn" style={{ background: "transparent", color: "var(--red)", borderColor: "var(--red)", padding: "4px 8px", fontSize: 12, height: "auto" }}>Excluir</button>
+                        <SubmitButton className="btn" style={{ background: "transparent", color: "var(--red)", borderColor: "var(--red)", padding: "4px 8px", fontSize: 12, height: "auto" }} confirmMessage={`Tem certeza que deseja remover a fonte "${s.name}"?`}>Excluir</SubmitButton>
                       </form>
                     </div>
                   </td>
@@ -162,7 +163,7 @@ export default async function ProjectDetail(
             </select>
             <input name="url" placeholder="URL" required style={{ maxWidth: 260 }} />
             <input name="interval" type="number" defaultValue={60} style={{ maxWidth: 90 }} />
-            <button className="btn secondary" type="submit">+ Fonte</button>
+            <SubmitButton className="btn secondary" type="submit">+ Fonte</SubmitButton>
           </form>
         </div>
       ))}

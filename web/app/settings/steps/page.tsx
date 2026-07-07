@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -76,7 +77,7 @@ export default async function StepsSettings() {
             placeholder="# O que é uma boa notícia..."
           />
         </label>
-        <button className="btn" type="submit">Salvar Treinamento</button>
+        <SubmitButton className="btn" type="submit">Salvar Treinamento</SubmitButton>
       </form>
 
       {sorted.map((c: any) => (
@@ -105,7 +106,7 @@ export default async function StepsSettings() {
             <span>User prompt template</span>
             <textarea name="user_prompt_template" defaultValue={c.user_prompt_template} />
           </label>
-          <button className="btn" type="submit">Salvar etapa</button>
+          <SubmitButton className="btn" type="submit">Salvar etapa</SubmitButton>
         </form>
       ))}
 

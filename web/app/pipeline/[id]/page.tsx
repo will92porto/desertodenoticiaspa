@@ -2,6 +2,9 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseAdmin, invokeFunction } from "@/lib/supabase";
 
+import { SubmitButton } from "@/components/SubmitButton";
+import { AutoRefresh } from "@/components/AutoRefresh";
+
 export const dynamic = "force-dynamic";
 
 const STEP_FN: Record<string, string> = {
@@ -84,8 +87,9 @@ export default async function ItemDetail(
           <h3 style={{ margin: 0 }}>Acionar etapas manualmente</h3>
           <div className="row" style={{ gap: 8 }}>
             <form action={runAllSteps}>
+              <AutoRefresh />
               <input type="hidden" name="id" value={item.id} />
-              <button className="btn" style={{ background: "var(--accent)", color: "#000", borderColor: "var(--accent)" }}>Executar Todas de uma vez</button>
+              <SubmitButton className="btn" style={{ background: "var(--accent)", color: "#000", borderColor: "var(--accent)" }} confirmMessage="Processar todas as etapas restantes para esta pauta?">Executar Todas de uma vez</SubmitButton>
             </form>
             <form action={async () => {
               "use server";
@@ -100,16 +104,17 @@ export default async function ItemDetail(
               }
               redirect("/pipeline");
             }}>
-              <button className="btn" style={{ background: "var(--red)", borderColor: "var(--red)" }}>Excluir Pauta</button>
+              <SubmitButton className="btn" style={{ background: "var(--red)", borderColor: "var(--red)" }} confirmMessage="Tem certeza absoluta que deseja excluir esta pauta?">Excluir Pauta</SubmitButton>
             </form>
           </div>
         </div>
         <div className="row">
           {(["understand", "rank", "write", "polish"] as const).map((s) => (
             <form action={runOneStep} key={s}>
+              <AutoRefresh />
               <input type="hidden" name="id" value={item.id} />
               <input type="hidden" name="step" value={s} />
-              <button className="btn secondary">{s}</button>
+              <SubmitButton className="btn secondary">{s}</SubmitButton>
             </form>
           ))}
         </div>

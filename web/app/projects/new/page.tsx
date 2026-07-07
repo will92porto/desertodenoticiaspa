@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -42,7 +43,7 @@ export default function NewProject() {
           <span>Nome do secret da Application Password</span>
           <input name="wp_secret" placeholder="ex.: WP_APP_PW_PROJETO1" />
         </label>
-        <button className="btn" type="submit">Criar projeto</button>
+        <SubmitButton className="btn" type="submit">Criar projeto</SubmitButton>
       </form>
     </div>
   );

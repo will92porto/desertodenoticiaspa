@@ -1,5 +1,6 @@
 import { revalidatePath } from "next/cache";
 import { supabaseAdmin } from "@/lib/supabase";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -94,9 +95,9 @@ export default async function ModelsSettings() {
           );
         })}
         
-        <button className="btn" type="submit" style={{ marginTop: "1rem" }}>
+        <SubmitButton className="btn" type="submit" style={{ marginTop: "1rem" }}>
           Salvar Ordem de Modelos
-        </button>
+        </SubmitButton>
       </form>
 
       <div className="card muted">

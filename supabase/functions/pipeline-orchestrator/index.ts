@@ -61,26 +61,24 @@ Deno.serve(async (req) => {
     if (error) throw error;
 
     const results: unknown[] = [];
-    for (const it of items ?? []) {
-      let currentStatus = it.status as string;
-      while (true) {
-        const fn = NEXT[currentStatus];
-        if (!fn) break;
-        
-        const r = await invokeFunction(fn, { content_item_id: it.id });
-        results.push({ id: it.id, from: currentStatus, fn, ok: r.ok });
-        
-        if (!r.ok) break;
+    let allDone = true;
 
-        // Verifica o novo status para continuar o loop
-        const { data: updatedItem } = await db.from("content_items").select("status").eq("id", it.id).single();
-        if (!updatedItem || updatedItem.status === currentStatus) break;
-        
-        currentStatus = updatedItem.status;
+    for (const it of items ?? []) {
+      const fn = NEXT[it.status as string];
+      if (!fn) {
+        continue;
       }
+      
+      allDone = false; // Tem pelo menos um item que avançou agora
+      
+      // Invoca apenas UMA etapa
+      const r = await invokeFunction(fn, { content_item_id: it.id });
+      results.push({ id: it.id, from: it.status, fn, ok: r.ok });
     }
 
-    return json({ ok: true, processed: results.length, results });
+    // Se processamos algo, mas ainda pode haver mais etapas, retornamos done: false.
+    // Se não havia itens ou todos já estão no status final, retornamos done: true.
+    return json({ ok: true, processed: results.length, done: allDone, results });
   } catch (e) {
     return json({ error: e instanceof Error ? e.message : String(e) }, 500);
   }

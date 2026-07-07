@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
         nativeTranscript = await fetchYoutubeTranscript(videoId);
         if (nativeTranscript) {
           // Trunca para análise rápida (economia de tokens)
-          const excerpt = nativeTranscript.substring(0, 2500);
+          const excerpt = nativeTranscript.substring(0, 200000);
           rawContent = rawContent ? `${rawContent}\n\n[Transcrição]: ${excerpt}` : `[Transcrição]: ${excerpt}`;
         }
       }

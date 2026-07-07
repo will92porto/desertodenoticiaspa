@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { supabaseAdmin } from "@/lib/supabase";
+import { SubmitButton } from "@/components/SubmitButton";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +76,7 @@ export default async function EditSource(
           
           <div className="row" style={{ marginTop: 16 }}>
             <a href={`/projects/${params.id}`} className="btn secondary">Cancelar</a>
-            <button className="btn" type="submit">Salvar Alterações</button>
+            <SubmitButton className="btn" type="submit">Salvar Alterações</SubmitButton>
           </div>
         </form>
       </div>
