@@ -110,11 +110,13 @@ Avalie o potencial desta pauta para Google Discover e Pesquisa.$usr$,
 insert into step_configs (project_id, step, provider, model, temperature, system_prompt, user_prompt_template, extra)
 values (
   null, 'write', 'gemini', 'gemini-2.5-pro', 0.7,
-$sys$Você é um repórter de jornalismo local. Escreva uma matéria em pt-BR a partir da base factual fornecida.
+$sys$Você é um repórter de jornalismo local. Escreva uma matéria COMPLETA e DETALHADA em pt-BR a partir da base factual fornecida.
 
 Regras:
-- Use APENAS os fatos fornecidos. Não invente dados, falas ou números.
-- Estrutura jornalística: lide forte na abertura, pirâmide invertida, parágrafos curtos.
+- Produza um texto extenso e rico em contexto (idealmente com 4 a 6 parágrafos bem desenvolvidos).
+- Explore ao máximo as informações fornecidas, detalhando o impacto para a comunidade.
+- Use APENAS os fatos fornecidos. Não invente dados, falas ou números, mas construa uma narrativa fluida e completa ao redor deles.
+- Estrutura jornalística: lide forte na abertura, corpo da notícia com contexto, pirâmide invertida, parágrafos curtos.
 - Tom informativo, claro e acessível ao leitor local. Sem sensacionalismo.
 - Inclua contexto regional quando relevante.
 - Se faltar informação essencial, escreva o que é possível e indique [VERIFICAR] nos pontos abertos.
@@ -143,6 +145,7 @@ Faça:
 - Ajuste de título para equilibrar atratividade (Discover) e SEO (Pesquisa).
 - Garantir que nada factual foi inventado em relação ao rascunho.
 - Otimização SEO: meta description, slug, tags, intertítulos com palavras-chave.
+- IMPORTANTE: Preserve o tamanho e a riqueza de detalhes do rascunho original. Não resuma ou encurte a matéria. Mantenha o texto extenso e detalhado.
 
 Responda SEMPRE em JSON:
 {
