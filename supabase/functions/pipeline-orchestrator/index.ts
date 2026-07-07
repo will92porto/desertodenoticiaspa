@@ -21,7 +21,7 @@ const NEXT: Record<string, string> = {
 };
 
 // Quantos itens processar por invocação (evita timeout da function).
-const BATCH = 5;
+const BATCH = 2;
 
 async function invokeFunction(name: string, body: unknown) {
   const base = Deno.env.get("SUPABASE_URL")!;
@@ -42,20 +42,42 @@ Deno.serve(async (req) => {
     const db = adminClient();
     const statuses = Object.keys(NEXT);
 
-    const { data: items, error } = await db
+    const body = await req.json().catch(() => ({}));
+    const specificIds = Array.isArray(body.ids) ? body.ids : null;
+
+    let query = db
       .from("content_items")
       .select("id, status")
       .in("status", statuses)
-      .order("captured_at", { ascending: true })
-      .limit(BATCH);
+      .order("captured_at", { ascending: true });
+
+    if (specificIds && specificIds.length > 0) {
+      query = query.in("id", specificIds);
+    } else {
+      query = query.limit(BATCH);
+    }
+
+    const { data: items, error } = await query;
     if (error) throw error;
 
     const results: unknown[] = [];
     for (const it of items ?? []) {
-      const fn = NEXT[it.status as string];
-      if (!fn) continue;
-      const r = await invokeFunction(fn, { content_item_id: it.id });
-      results.push({ id: it.id, from: it.status, fn, ok: r.ok });
+      let currentStatus = it.status as string;
+      while (true) {
+        const fn = NEXT[currentStatus];
+        if (!fn) break;
+        
+        const r = await invokeFunction(fn, { content_item_id: it.id });
+        results.push({ id: it.id, from: currentStatus, fn, ok: r.ok });
+        
+        if (!r.ok) break;
+
+        // Verifica o novo status para continuar o loop
+        const { data: updatedItem } = await db.from("content_items").select("status").eq("id", it.id).single();
+        if (!updatedItem || updatedItem.status === currentStatus) break;
+        
+        currentStatus = updatedItem.status;
+      }
     }
 
     return json({ ok: true, processed: results.length, results });

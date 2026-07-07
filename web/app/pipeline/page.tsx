@@ -36,6 +36,15 @@ async function publish(formData: FormData) {
   });
 }
 
+async function massAdvance(formData: FormData) {
+  "use server";
+  const ids = formData.getAll("ids");
+  if (!ids || ids.length === 0) return;
+  const idList = ids.map(id => String(id));
+  
+  await runAndReport("Avançar Selecionados", "pipeline-orchestrator", { ids: idList });
+}
+
 async function massDelete(formData: FormData) {
   "use server";
   const ids = formData.getAll("ids");
@@ -122,9 +131,12 @@ export default async function PipelinePage(
 
       <div className="card">
         <form>
-          <div style={{ marginBottom: "1rem" }}>
+          <div style={{ marginBottom: "1rem", display: "flex", gap: "10px" }}>
             <button formAction={massDelete} className="btn" style={{ background: "var(--red)", borderColor: "var(--red)", padding: "4px 8px", fontSize: "0.85rem" }}>
               Excluir Selecionados
+            </button>
+            <button formAction={massAdvance} className="btn secondary" style={{ padding: "4px 8px", fontSize: "0.85rem" }}>
+              Avançar Selecionados
             </button>
           </div>
           <table>

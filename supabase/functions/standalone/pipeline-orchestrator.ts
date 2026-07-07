@@ -37,7 +37,7 @@ var NEXT = {
   ranked: "step-write",
   written: "step-polish"
 };
-var BATCH = 5;
+var BATCH = 2;
 async function invokeFunction(name, body) {
   const base = Deno.env.get("SUPABASE_URL");
   const key = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
@@ -54,14 +54,40 @@ Deno.serve(async (req) => {
   try {
     const db = adminClient();
     const statuses = Object.keys(NEXT);
-    const { data: items, error } = await db.from("content_items").select("id, status").in("status", statuses).order("captured_at", { ascending: true }).limit(BATCH);
+
+    const body = await req.json().catch(() => ({}));
+    const specificIds = Array.isArray(body.ids) ? body.ids : null;
+
+    let query = db
+      .from("content_items")
+      .select("id, status")
+      .in("status", statuses)
+      .order("captured_at", { ascending: true });
+
+    if (specificIds && specificIds.length > 0) {
+      query = query.in("id", specificIds);
+    } else {
+      query = query.limit(BATCH);
+    }
+
+    const { data: items, error } = await query;
     if (error) throw error;
     const results = [];
     for (const it of items ?? []) {
-      const fn = NEXT[it.status];
-      if (!fn) continue;
-      const r = await invokeFunction(fn, { content_item_id: it.id });
-      results.push({ id: it.id, from: it.status, fn, ok: r.ok });
+      let currentStatus = it.status;
+      while (true) {
+        const fn = NEXT[currentStatus];
+        if (!fn) break;
+        const r = await invokeFunction(fn, { content_item_id: it.id });
+        results.push({ id: it.id, from: currentStatus, fn, ok: r.ok });
+        
+        if (!r.ok) break;
+
+        const { data: updatedItem } = await db.from("content_items").select("status").eq("id", it.id).single();
+        if (!updatedItem || updatedItem.status === currentStatus) break;
+        
+        currentStatus = updatedItem.status;
+      }
     }
     return json({ ok: true, processed: results.length, results });
   } catch (e) {
