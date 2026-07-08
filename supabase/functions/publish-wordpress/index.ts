@@ -43,10 +43,10 @@ Deno.serve(async (req) => {
       return json({ error: "projeto sem WordPress configurado" }, 400);
     }
 
-    // Obtém a senha do WordPress pelas variáveis de ambiente (via nome do secret no DB) ou fallback global
-    const appPw = (project.wordpress_app_password_secret ? Deno.env.get(project.wordpress_app_password_secret) : null) ||
+    // Obtém a senha do WordPress: 1) valor direto salvo no DB pela UI, 2) fallback para env var global
+    const appPw = project.wordpress_app_password_secret ||
                   Deno.env.get("WORDPRESS_APP_PASSWORD");
-    if (!appPw) return json({ error: "senha de aplicação do WordPress ausente nas variáveis de ambiente" }, 400);
+    if (!appPw) return json({ error: "senha de aplicação do WordPress ausente" }, 400);
 
     const seo = (item.seo ?? {}) as Record<string, string>;
     const auth = btoa(`${project.wordpress_username}:${appPw}`);
