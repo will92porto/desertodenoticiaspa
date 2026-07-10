@@ -1,10 +1,36 @@
 // PUBLICAÇÃO — envia um content_item "ready" para o WordPress via REST API.
 // Recebe { content_item_id, status? }. status default "draft" no WP (revisão humana).
-// Usa as credenciais do projeto (Application Password do WordPress).
+// Usa as credenciais do projeto (tabela wordpress_integrations).
+//
+// AUTOCONTIDA: sem imports de ../_shared para permitir deploy pelo dashboard
+// do Supabase, que não empacota arquivos fora da pasta da função.
 
-import { adminClient } from "../_shared/db.ts";
-import { json, handleOptions } from "../_shared/http.ts";
-import type { ContentItem } from "../_shared/types.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
+function adminClient() {
+  const url = Deno.env.get("SUPABASE_URL")!;
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  if (!url || !serviceKey) {
+    throw new Error("SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios.");
+  }
+  return createClient(url, serviceKey, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
 
 // Markdown -> HTML mínimo para o WordPress (títulos, parágrafos, ênfase).
 function mdToHtml(md: string): string {
@@ -14,7 +40,7 @@ function mdToHtml(md: string): string {
     const h = line.match(/^(#{1,6})\s+(.*)$/);
     if (h) { out.push(`<h${h[1].length}>${h[2]}</h${h[1].length}>`); continue; }
     if (line.trim() === "") { out.push(""); continue; }
-    let t = line
+    const t = line
       .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
       .replace(/\*(.+?)\*/g, "<em>$1</em>");
     out.push(`<p>${t}</p>`);
@@ -23,8 +49,9 @@ function mdToHtml(md: string): string {
 }
 
 Deno.serve(async (req) => {
-  const pre = handleOptions(req);
-  if (pre) return pre;
+  if (req.method === "OPTIONS") {
+    return new Response("ok", { headers: corsHeaders });
+  }
 
   try {
     const { content_item_id, status = "draft" } = await req.json();
@@ -33,15 +60,14 @@ Deno.serve(async (req) => {
     const { data: item, error } = await db
       .from("content_items").select("*").eq("id", content_item_id).single();
     if (error || !item) return json({ error: "content_item não encontrado" }, 404);
-    if ((item as ContentItem).status !== "ready") {
+    if (item.status !== "ready") {
       return json({ error: `item não está 'ready' (status: ${item.status})` }, 409);
     }
 
-    const projectId = (item as ContentItem).project_id;
-
     // Busca credenciais do WordPress na tabela wordpress_integrations
     const { data: wpIntegration } = await db
-      .from("wordpress_integrations").select("*").eq("project_id", projectId).single();
+      .from("wordpress_integrations").select("*")
+      .eq("project_id", item.project_id).single();
     if (!wpIntegration?.url) {
       return json({ error: "projeto sem WordPress configurado" }, 400);
     }
