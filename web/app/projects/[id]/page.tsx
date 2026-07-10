@@ -49,11 +49,13 @@ async function updateWordPressConfig(formData: FormData) {
   "use server";
   const db = supabaseAdmin();
   const pid = String(formData.get("project_id"));
-  const { error } = await db.from("projects").update({
-    wordpress_base_url: String(formData.get("wordpress_base_url") || ""),
-    wordpress_username: String(formData.get("wordpress_username") || ""),
-    wordpress_app_password_secret: String(formData.get("wordpress_app_password_secret") || ""),
-  }).eq("id", pid);
+  const { error } = await db.from("wordpress_integrations").upsert({
+    project_id: pid,
+    url: String(formData.get("wordpress_url") || ""),
+    username: String(formData.get("wordpress_username") || ""),
+    application_password: String(formData.get("wordpress_app_password") || ""),
+    updated_at: new Date().toISOString(),
+  }, { onConflict: "project_id" });
   
   if (error) {
     redirect(`/projects/${pid}?erro=${encodeURIComponent(`WordPress: ${error.message}`)}`);
@@ -68,6 +70,8 @@ export default async function ProjectDetail(
   const { data: project } = await db.from("projects").select("*").eq("id", params.id).single();
   const { data: regions } = await db
     .from("regions").select("*, sources(*)").eq("project_id", params.id);
+  const { data: wpIntegration } = await db
+    .from("wordpress_integrations").select("*").eq("project_id", params.id).single();
 
   if (!project) return <p>Projeto não encontrado.</p>;
 
@@ -92,17 +96,17 @@ export default async function ProjectDetail(
           
           <label className="field" style={{ flex: "1 1 200px" }}>
             <span>URL do WordPress</span>
-            <input name="wordpress_base_url" placeholder="Ex: https://meusite.com.br" defaultValue={project.wordpress_base_url || ""} />
+            <input name="wordpress_url" placeholder="Ex: https://meusite.com.br" defaultValue={wpIntegration?.url || ""} />
           </label>
           
           <label className="field" style={{ flex: "1 1 150px" }}>
             <span>Usuário</span>
-            <input name="wordpress_username" placeholder="Login" defaultValue={project.wordpress_username || ""} />
+            <input name="wordpress_username" placeholder="Login" defaultValue={wpIntegration?.username || ""} />
           </label>
           
           <label className="field" style={{ flex: "1 1 200px" }}>
             <span>Senha de Aplicativo (Application Password)</span>
-            <input type="password" name="wordpress_app_password_secret" placeholder="••••••••" defaultValue={project.wordpress_app_password_secret || ""} />
+            <input type="password" name="wordpress_app_password" placeholder="••••••••" defaultValue={wpIntegration?.application_password || ""} />
           </label>
 
           <SubmitButton className="btn" type="submit" style={{ marginBottom: "12px" }}>Salvar WordPress</SubmitButton>

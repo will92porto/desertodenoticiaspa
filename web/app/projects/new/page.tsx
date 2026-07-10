@@ -11,18 +11,25 @@ async function createProject(formData: FormData) {
   const slug = String(formData.get("slug") || "").trim() ||
     name.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
         .replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-  const { error } = await db.from("projects").insert({
+  const { data: project, error } = await db.from("projects").insert({
     name,
     slug,
     description: String(formData.get("description") || ""),
-    wordpress_base_url: String(formData.get("wp_url") || "") || null,
-    wordpress_username: String(formData.get("wp_user") || "") || null,
-    wordpress_app_password_secret: String(formData.get("wp_secret") || "") || null,
-  });
-  // Não mascara falha: se o insert falhar (RLS, env faltando, tabela ausente),
-  // o erro aparece em vez de redirecionar como se tivesse salvo.
+  }).select("id").single();
   if (error) {
     throw new Error(`Falha ao criar projeto: ${error.message} (code: ${error.code})`);
+  }
+  // Insere credenciais do WordPress na tabela separada, se fornecidas
+  const wpUrl = String(formData.get("wp_url") || "").trim();
+  const wpUser = String(formData.get("wp_user") || "").trim();
+  const wpSecret = String(formData.get("wp_secret") || "").trim();
+  if (wpUrl && wpUser && wpSecret && project?.id) {
+    await db.from("wordpress_integrations").insert({
+      project_id: project.id,
+      url: wpUrl,
+      username: wpUser,
+      application_password: wpSecret,
+    });
   }
   redirect("/projects");
 }
@@ -40,8 +47,8 @@ export default function NewProject() {
         <label className="field"><span>URL base do WordPress</span><input name="wp_url" placeholder="https://meusite.com" /></label>
         <label className="field"><span>Usuário WordPress</span><input name="wp_user" /></label>
         <label className="field">
-          <span>Nome do secret da Application Password</span>
-          <input name="wp_secret" placeholder="ex.: WP_APP_PW_PROJETO1" />
+          <span>Senha de Aplicativo (Application Password)</span>
+          <input type="password" name="wp_secret" placeholder="••••••••" />
         </label>
         <SubmitButton className="btn" type="submit">Criar projeto</SubmitButton>
       </form>

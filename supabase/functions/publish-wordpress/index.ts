@@ -37,20 +37,22 @@ Deno.serve(async (req) => {
       return json({ error: `item não está 'ready' (status: ${item.status})` }, 409);
     }
 
-    const { data: project } = await db
-      .from("projects").select("*").eq("id", (item as ContentItem).project_id).single();
-    if (!project?.wordpress_base_url) {
+    const projectId = (item as ContentItem).project_id;
+
+    // Busca credenciais do WordPress na tabela wordpress_integrations
+    const { data: wpIntegration } = await db
+      .from("wordpress_integrations").select("*").eq("project_id", projectId).single();
+    if (!wpIntegration?.url) {
       return json({ error: "projeto sem WordPress configurado" }, 400);
     }
 
-    // Obtém a senha do WordPress: 1) valor direto salvo no DB pela UI, 2) fallback para env var global
-    const appPw = project.wordpress_app_password_secret ||
+    const appPw = wpIntegration.application_password ||
                   Deno.env.get("WORDPRESS_APP_PASSWORD");
     if (!appPw) return json({ error: "senha de aplicação do WordPress ausente" }, 400);
 
     const seo = (item.seo ?? {}) as Record<string, string>;
-    const auth = btoa(`${project.wordpress_username}:${appPw}`);
-    const endpoint = `${project.wordpress_base_url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
+    const auth = btoa(`${wpIntegration.username}:${appPw}`);
+    const endpoint = `${wpIntegration.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
 
     await db.from("content_items").update({ status: "publishing" }).eq("id", content_item_id);
 
