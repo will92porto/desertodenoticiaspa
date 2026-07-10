@@ -48,6 +48,22 @@ function mdToHtml(md: string): string {
   return out.join("\n");
 }
 
+// Extrai a manchete (primeiro título H1/H2 do markdown) e devolve o corpo sem ela,
+// para o WP não repetir a manchete dentro do conteúdo.
+function splitHeadline(md: string): { headline: string | null; body: string } {
+  const lines = md.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (trimmed === "") continue;
+    const h = trimmed.match(/^#{1,2}\s+(.*)$/);
+    if (h) {
+      return { headline: h[1].trim(), body: lines.slice(i + 1).join("\n").trim() };
+    }
+    break; // primeiro conteúdo não é título — mantém tudo
+  }
+  return { headline: null, body: md };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
@@ -77,6 +93,7 @@ Deno.serve(async (req) => {
     if (!appPw) return json({ error: "senha de aplicação do WordPress ausente" }, 400);
 
     const seo = (item.seo ?? {}) as Record<string, string>;
+    const { headline, body } = splitHeadline(item.final_article ?? "");
     const auth = btoa(`${wpIntegration.username}:${appPw}`);
     const endpoint = `${wpIntegration.url.replace(/\/$/, "")}/wp-json/wp/v2/posts`;
 
@@ -86,9 +103,10 @@ Deno.serve(async (req) => {
       method: "POST",
       headers: { "Content-Type": "application/json", "Authorization": `Basic ${auth}` },
       body: JSON.stringify({
-        title: seo.title || item.title || "Sem título",
+        // Prioridade: manchete do próprio artigo > título de SEO > título da fonte
+        title: headline || seo.title || item.title || "Sem título",
         slug: seo.slug || undefined,
-        content: mdToHtml(item.final_article ?? ""),
+        content: mdToHtml(body),
         excerpt: seo.meta_description || undefined,
         status, // draft (revisão) ou publish
       }),
